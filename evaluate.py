@@ -14,7 +14,8 @@ from classifier import CNNClassifier, evaluate
 import os
 
 def main(args):
-    data_pth = "data/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
     train_pth = os.path.join(data_pth, "train_data.txt")
     train_data = MonoTextData(train_pth, True, vocab=100000)
     vocab = train_data.vocab
@@ -28,7 +29,9 @@ def main(args):
 
     # Classification Accuracy
     model = CNNClassifier(len(vocab), 300, [1, 2, 3, 4, 5], 500, 0.5).to(device)
-    model.load_state_dict(torch.load("checkpoint/%s-classifier.pt" % args.data_name))
+    model.load_state_dict(torch.load(os.path.join(args.hard_disk_dir, "checkpoint", f"{args.data_name}-classifier.pt")))
+    
+    # model.load_state_dict(torch.load("checkpoint/%s-classifier.pt" % args.data_name))
     model.eval()
     eval_data, eval_label = eval_data.create_data_batch_labels(64, device, batch_first=True)
     acc = 100 * evaluate(model, eval_data, eval_label)
@@ -50,6 +53,7 @@ def main(args):
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--target_path', type=str)
 
 

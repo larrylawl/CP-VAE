@@ -52,7 +52,8 @@ def evaluate(model, eval_data, eval_label):
     return correct_num / total_sample
 
 def main(args):
-    data_pth = "data/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
     train_pth = os.path.join(data_pth, "train_data.txt")
     dev_pth = os.path.join(data_pth, "dev_data.txt")
     test_pth = os.path.join(data_pth, "test_data.txt")
@@ -61,10 +62,11 @@ def main(args):
     vocab = train_data.vocab
     dev_data = MonoTextData(dev_pth, True, vocab=vocab)
     test_data = MonoTextData(test_pth, True, vocab=vocab)
-    path = "checkpoint/%s-classifier.pt" % args.data_name
+    path = os.path.join(args.hard_disk_dir, "checkpoint", f"{args.data_name}-classifier.pt")
+    # path = "checkpoint/%s-classifier.pt" % args.data_name
 
     glove_embed = np.zeros((len(vocab), 300))
-    with open("data/glove.840B.300d.txt") as f:
+    with open(os.path.join(args.hard_disk_dir, "data", "glove.840B.300d.txt")) as f:
         for line in f:
             word, vec = line.split(' ', 1)
             if word in vocab:
@@ -124,6 +126,7 @@ def main(args):
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--max_epochs', type=int, default=20)
 
 

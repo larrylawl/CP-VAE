@@ -52,10 +52,10 @@ class VocabEntry(object):
     def id2word(self, wid):
         return self.id2word_[wid]
 
-    def decode_sentence(self, sentence):
+    def decode_sentence(self, sentence, tensor=True):
         decoded_sentence = []
         for wid_t in sentence:
-            wid = wid_t.item()
+            wid = wid_t.item() if tensor else wid_t
             decoded_sentence.append(self.id2word_[wid])
         return decoded_sentence
 
@@ -119,7 +119,10 @@ class MonoTextData(object):
             if glove:
                 vocab.create_glove_embed()
 
+        # debug_data = [" ".join(x) for x in data]
+        # print(debug_data[:10])
         data = [[vocab[word] for word in x] for x in data]
+        # print(data[:10])
 
         return data, vocab, dropped, labels
 
@@ -243,7 +246,7 @@ class MonoTextData(object):
                 batch_data, sents_len = self._to_tensor(batch_data, batch_first, device)
                 batch_data_list.append(batch_data)
                 batch_feat = torch.tensor(
-                    batch_feat, dtype=torch.float, requires_grad=False, device=device)
+                    np.array(batch_feat), dtype=torch.float, requires_grad=False, device=device)
                 batch_feat_list.append(batch_feat)
 
                 total += batch_data.size(0)

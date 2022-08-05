@@ -379,7 +379,7 @@ class LSTMDecoder(nn.Module):
 
                 log_prob, indexes = torch.topk(decoder_output, K - len(completed_hypotheses))
 
-                live_ids = indexes // len(self.vocab)
+                live_ids = torch.div(indexes, len(self.vocab), rounding_mode='trunc')
                 word_ids = indexes % len(self.vocab)
 
                 live_hypotheses_new = []

@@ -23,7 +23,8 @@ def get_coordinates(a, b, p):
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    data_pth = "data/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
     train_data = MonoTextData(train_data_pth, True)
@@ -138,15 +139,22 @@ def main(args):
             label = test_data.labels[idx]
             _idx = idx + bsz if label else min(idx + bsz, sep_id)
             _idx = min(_idx, n_samples)
-            var_id = neg_idx if label else pos_idx
+            var_id = neg_idx if label else pos_idx  # id of the basis vector
             text, _ = test_data._to_tensor(
                 test_data.data[idx:_idx], batch_first=False, device=device)
             feat = torch.tensor(test_feat[idx:_idx], dtype=torch.float, requires_grad=False, device=device)
-            z1, _ = model.vae.lstm_encoder(text[:min(text.shape[0], 10)])
-            ori_z2, _ = model.vae.mlp_encoder(feat)
+            z1, _ = model.vae.lstm_encoder(text[:min(text.shape[0], 10)])  # content
+            ori_z2, _ = model.vae.mlp_encoder(feat)  # original style
             tra_z2 = model.vae.mlp_encoder.var_embedding[var_id:var_id + 1, :].expand(
-                _idx - idx, -1)
+                _idx - idx, -1)  # fixed to target style (pos or neg)
             texts = model.vae.decoder.beam_search_decode(z1, tra_z2)
+            # ###
+            # decoded_texts = [" ".join(test_data.vocab.decode_sentence(sent, tensor=False)) for sent in test_data.data[idx:_idx]]
+            # print(decoded_texts)
+            # transferred_texts = [" ".join(text[1:-1]) for text in texts]
+            # print(transferred_texts)
+            # exit(1)
+            # ###
             for text in texts:
                 f.write("%d\t%s\n" % (1 - label, " ".join(text[1:-1])))
 
@@ -167,6 +175,7 @@ def main(args):
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--feat', type=str, default='glove')
     parser.add_argument('--load_path', type=str)
     parser.add_argument('--text_only', default=False, action='store_true')

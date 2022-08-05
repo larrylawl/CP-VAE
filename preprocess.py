@@ -28,8 +28,7 @@ def preprocess(split='train', unk='_UNK'):
             content = content.replace('-rcb-', "}")
             f_out.write(content)
 
-def get_glove_embeds(in_file, out_file):
-    glove_file = "data/glove.840B.300d.txt"
+def get_glove_embeds(in_file, out_file, glove_file):
     word_vec = {}
     with open(glove_file) as f:
         for line in f:
@@ -77,8 +76,11 @@ def flip_files(pth, outpth, with_label=True):
                 f_out.write(content + "\n")
 
 def main(args):
-    data_pth = "data/%s" % args.data_name
-    res_pth = "results/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    # res_pth = "results/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    res_pth = os.path.join(args.hard_disk_dir, "results", args.data_name)
+    
     for split in ["train", "dev", "test"]:
         pth0 = "sentiment.%s.0" % split
         pth1 = "sentiment.%s.1" % split
@@ -93,7 +95,9 @@ def main(args):
 
         fin = _outpth
         fout = os.path.join(data_pth, "%s_glove.npy" % split)
-        get_glove_embeds(fin, fout)
+        # glove_file = "data/glove.840B.300d.txt"
+        glove_file = os.path.join(args.hard_disk_dir, "data/glove.840B.300d.txt")
+        get_glove_embeds(fin, fout, glove_file)
 
     conf = config.CONFIG[args.data_name]
     if "ref0" in conf:
@@ -131,6 +135,7 @@ def main(args):
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
 
 
 if __name__ == "__main__":

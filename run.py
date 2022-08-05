@@ -17,7 +17,8 @@ import numpy as np
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    # data_pth = "data/%s" % args.data_name
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
     train_data = MonoTextData(train_data_pth, True)
@@ -38,7 +39,7 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     save_path = '{}-{}-{}'.format(args.save, args.data_name, args.feat)
-    save_path = os.path.join(save_path, time.strftime("%Y%m%d-%H%M%S"))
+    save_path = os.path.join(args.hard_disk_dir, save_path, time.strftime("%Y%m%d-%H%M%S"))
     scripts_to_save = [
         'run.py', 'models/decomposed_vae.py', 'models/vae.py',
         'models/base_network.py', 'config.py']
@@ -92,6 +93,7 @@ def main(args):
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp',
                         help='data name')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--save', type=str, default='checkpoint/ours',
                         help='directory name to save')
     parser.add_argument('--bsz', type=int, default=32,
