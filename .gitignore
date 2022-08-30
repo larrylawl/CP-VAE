@@ -15,3 +15,5 @@
 **/*.png
 **/*.jsonl
 data/*
+scripts/
+plot_gp/*

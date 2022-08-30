@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    data_pth = "data/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
     train_data = MonoTextData(train_data_pth, True)
@@ -89,10 +90,11 @@ def main(args):
     graph = mapper.map(z_embed, zs,
             clusterer=sklearn.cluster.DBSCAN(eps=0.1, min_samples=3, metric='cosine'),
             cover=km.Cover(n_cubes=args.resolution, perc_overlap=0.4))
-    mapper.visualize(graph, path_html='plot/tda_ours.html', title='tda ours')
+    mapper.visualize(graph, path_html='plot_gp/tda_ours.html', title='tda ours')
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--load_path', type=str)
     parser.add_argument('--feat', type=str, default='glove')
     parser.add_argument('--resolution', type=int, default=5)

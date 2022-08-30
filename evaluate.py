@@ -15,7 +15,7 @@ import os
 
 def main(args):
     # data_pth = "data/%s" % args.data_name
-    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     train_pth = os.path.join(data_pth, "train_data.txt")
     train_data = MonoTextData(train_pth, True, vocab=100000)
     vocab = train_data.vocab

@@ -23,7 +23,7 @@ fig = plt.figure()
 
 # beta-VAE one std
 
-ax2 = fig.add_subplot("221")
+ax2 = fig.add_subplot(221)
 m1, m2 = load_nll("plot/nll_1.txt")
 ax2.hist(m1, 50, color="tab:green", alpha=0.5)
 ax2.hist(m2, 50, color="tab:red", alpha=0.5)
@@ -37,8 +37,8 @@ ax2.set_title('(A)', x=0.0, fontsize=12)
 
 # beta-VAE two std
 
-ax4 = fig.add_subplot("222")
-m1, m2 = load_nll("plot/nll_2.txt")
+ax4 = fig.add_subplot(222)
+m1, m2 = load_nll("plot_gp/nll_2.txt")
 ax4.hist(m1, 50, color="tab:green", alpha=0.5)
 ax4.hist(m2, 50, color="tab:purple", alpha=0.5)
 
@@ -50,7 +50,7 @@ ax4.set_title('(B)', x=0.0, fontsize=12)
 
 # beta-VAE extreme
 
-ax6 = fig.add_subplot("223")
+ax6 = fig.add_subplot(223)
 m1, m2 = load_nll("plot/nll_3.txt")
 ax6.hist(m1, 50, color="tab:green", alpha=0.5)
 ax6.hist(m2, 50, color="tab:pink", alpha=0.5)
@@ -65,8 +65,8 @@ ax6.set_title('(C)', x=0.0, fontsize=12)
 
 # CP-VAE
 
-ax8 = fig.add_subplot("224")
-m1, m2 = load_nll("plot/ours_nll.txt")
+ax8 = fig.add_subplot(224)
+m1, m2 = load_nll("plot_gp/ours_nll.txt")
 ax8.hist(m1, 50, color="tab:cyan", alpha=0.5)
 ax8.hist(m2, 50, color="tab:orange", alpha=0.5)
 
@@ -77,4 +77,4 @@ ax8.legend(handles, labels, loc='upper right')
 ax8.set_xlabel('NLL of the Latent Codes')
 ax8.set_title('(D)', x=0.0, fontsize=12)
 
-plt.savefig('plot/nll_comparison.png')
+plt.savefig('plot_gp/nll_comparison.png')

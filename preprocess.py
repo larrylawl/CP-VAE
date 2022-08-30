@@ -78,12 +78,12 @@ def flip_files(pth, outpth, with_label=True):
 def main(args):
     # data_pth = "data/%s" % args.data_name
     # res_pth = "results/%s" % args.data_name
-    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     res_pth = os.path.join(args.hard_disk_dir, "results", args.data_name)
     
     for split in ["train", "dev", "test"]:
-        pth0 = "sentiment.%s.0" % split
-        pth1 = "sentiment.%s.1" % split
+        pth0 = "%s_processed.0" % split
+        pth1 = "%s_processed.1" % split
         outpth = "%s_data.txt" % split
         _outpth = "_%s_data.txt" % split
         pth0 = os.path.join(data_pth, pth0)

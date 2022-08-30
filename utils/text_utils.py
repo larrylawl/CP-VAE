@@ -245,6 +245,9 @@ class MonoTextData(object):
                 cur = nxt
                 batch_data, sents_len = self._to_tensor(batch_data, batch_first, device)
                 batch_data_list.append(batch_data)
+                # batch_feat = torch.tensor(
+                #     batch_feat, dtype=torch.float, requires_grad=False, device=device)
+                
                 batch_feat = torch.tensor(
                     np.array(batch_feat), dtype=torch.float, requires_grad=False, device=device)
                 batch_feat_list.append(batch_feat)

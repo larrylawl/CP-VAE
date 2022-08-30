@@ -24,7 +24,7 @@ def get_coordinates(a, b, p):
 def main(args):
     conf = config.CONFIG[args.data_name]
     # data_pth = "data/%s" % args.data_name
-    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
     train_data = MonoTextData(train_data_pth, True)

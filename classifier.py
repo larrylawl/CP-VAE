@@ -53,7 +53,7 @@ def evaluate(model, eval_data, eval_label):
 
 def main(args):
     # data_pth = "data/%s" % args.data_name
-    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     train_pth = os.path.join(data_pth, "train_data.txt")
     dev_pth = os.path.join(data_pth, "dev_data.txt")
     test_pth = os.path.join(data_pth, "test_data.txt")

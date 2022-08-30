@@ -16,7 +16,8 @@ from utils.dist_utils import cal_log_density
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    data_pth = "data/%s" % args.data_name
+    # data_pth = "data/%s" % args.data_name
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_data = MonoTextData(train_data_pth, True)
     vocab = train_data.vocab
@@ -115,31 +116,32 @@ def main(args):
     ori_logps = []
     tra_logps = []
     with open(os.path.join(args.load_path, 'generated_text_%d.txt' % args.type), "w") as f:
-        idx = 0
-        step = 0
-        n_samples = len(test_data.labels)
-        while idx < n_samples:
-            label = test_data.labels[idx]
-            _idx = idx + bsz if label else min(idx + bsz, sep_id)
-            _idx = min(_idx, n_samples)
-            text, _ = test_data._to_tensor(test_data.data[idx:_idx], batch_first=False, device=device)
-            z, _ = model.vae.encoder(text)
-            ori_z = z.clone()
-            tmp = max_v if label == sign else min_v
-            if args.type > 0:
-                z[:, best_idx] += torch.ones(text.shape[1]).to(device) * tmp
-            texts = model.vae.decoder.beam_search_decode(z)
-            for text in texts:
-                f.write("%d\t%s\n" % (1 - label, " ".join(text[1:-1])))
+        with torch.no_grad():
+            idx = 0
+            step = 0
+            n_samples = len(test_data.labels)
+            while idx < n_samples:
+                label = test_data.labels[idx]
+                _idx = idx + bsz if label else min(idx + bsz, sep_id)
+                _idx = min(_idx, n_samples)
+                text, _ = test_data._to_tensor(test_data.data[idx:_idx], batch_first=False, device=device)
+                z, _ = model.vae.encoder(text)
+                ori_z = z.clone()
+                tmp = max_v if label == sign else min_v
+                if args.type > 0:
+                    z[:, best_idx] += torch.ones(text.shape[1]).to(device) * tmp
+                texts = model.vae.decoder.beam_search_decode(z)
+                for text in texts:
+                    f.write("%d\t%s\n" % (1 - label, " ".join(text[1:-1])))
 
-            for i in range(_idx - idx):
-                ori_logps.append(cal_log_density(mus, logvars, ori_z[i:i + 1].cpu()))
-                tra_logps.append(cal_log_density(mus, logvars, z[i:i + 1].cpu()))
+                for i in range(_idx - idx):
+                    ori_logps.append(cal_log_density(mus, logvars, ori_z[i:i + 1].cpu()))
+                    tra_logps.append(cal_log_density(mus, logvars, z[i:i + 1].cpu()))
 
-            idx = _idx
-            step += 1
-            if step % 100 == 0:
-                print(step, idx)
+                idx = _idx
+                step += 1
+                if step % 100 == 0:
+                    print(step, idx)
 
     with open(os.path.join(args.load_path, "nll_%d.txt" % args.type), "w") as f:
         for x, y in zip(ori_logps, tra_logps):
@@ -147,6 +149,7 @@ def main(args):
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
+    parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
     parser.add_argument('--load_path', type=str)
     parser.add_argument('--type', type=int, default=0,
                         help='0: no change, 1: one std, 2: two std, 3: extreme')

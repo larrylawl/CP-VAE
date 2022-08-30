@@ -86,7 +86,7 @@ class DecomposedVAE(nn.Module):
         neg_scores = neg_scores / torch.norm(neg, 2, -1)
         neg_scores = neg_scores.view(neg_samples, -1)
         pos_scores = pos_scores.unsqueeze(0).repeat(neg_samples, 1)
-        raw_loss = torch.clamp(1 - pos_scores + neg_scores, min=0.).mean(0)
+        raw_loss = torch.clamp(1 - pos_scores + neg_scores, min=0.).mean(0)  # equation 7
         srec_loss = raw_loss.mean()
         reg_loss = self.mlp_encoder.orthogonal_regularizer()
         return srec_loss, reg_loss, raw_loss.sum()

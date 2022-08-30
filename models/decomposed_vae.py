@@ -15,13 +15,14 @@ import time
 import os
 
 class DecomposedVAE:
-    def __init__(self, train, valid, test, feat, bsz, save_path, logging, log_interval, num_epochs,
+    def __init__(self, train, valid, test, feat, bsz, save_path, logging, writer, log_interval, num_epochs,
                  enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, srec_weight, reg_weight, ic_weight,
                  aggressive, text_only, vae_params):
         super(DecomposedVAE, self).__init__()
         self.bsz = bsz
         self.save_path = save_path
         self.logging = logging
+        self.writer = writer
         self.log_interval = log_interval
         self.num_epochs = num_epochs
         self.enc_lr = enc_lr
@@ -69,6 +70,9 @@ class DecomposedVAE:
         total_kl1_loss = 0
         total_kl2_loss = 0
         total_srec_loss = 0
+        total_reg_loss = 0
+        total_vae_loss = 0
+        total_loss = 0
         start_time = time.time()
         step = 0
         num_words = 0
@@ -146,12 +150,13 @@ class DecomposedVAE:
             vae_rec_loss = F.cross_entropy(vae_logits, target.view(-1), reduction="none")
             vae_rec_loss = vae_rec_loss.view(-1, batch_size).sum(0)
             vae_loss = vae_rec_loss + beta1 * vae_kl1_loss + beta2 * vae_kl2_loss
-            if self.ic_weight > 0:
-                vae_loss += self.ic_weight * reg_ic
-            vae_loss = vae_loss.mean()
             total_rec_loss += vae_rec_loss.sum().item()
             total_kl1_loss += vae_kl1_loss.sum().item()
             total_kl2_loss += vae_kl2_loss.sum().item()
+            total_vae_loss += vae_loss.sum().item()
+            if self.ic_weight > 0:
+                vae_loss += self.ic_weight * reg_ic
+            vae_loss = vae_loss.mean()
             loss = loss + vae_loss
 
             if self.text_only:
@@ -169,7 +174,11 @@ class DecomposedVAE:
                                         requires_grad=False, device=self.device)
                 srec_loss, reg_loss, srec_raw_loss = self.vae.var_loss(batch_feat, neg_feat, 10)
             total_srec_loss += srec_raw_loss.item()
-            loss = loss + self.srec_weight * srec_loss + self.reg_weight * reg_loss
+            total_reg_loss += reg_loss.item()
+            
+            # TODO: reg_loss should be scaled by num_sents? 
+            loss = loss + self.srec_weight * srec_loss + self.reg_weight * reg_loss  # equation 8
+            total_loss += loss.item()
 
             loss.backward()
 
@@ -178,26 +187,55 @@ class DecomposedVAE:
                 self.enc_optimizer.step()
             self.dec_optimizer.step()
 
-            if step % self.log_interval == 0 and step > 0:
-                cur_rec_loss = total_rec_loss / num_sents
-                cur_kl1_loss = total_kl1_loss / num_sents
-                cur_kl2_loss = total_kl2_loss / num_sents
-                cur_vae_loss = cur_rec_loss + cur_kl1_loss + cur_kl2_loss
-                cur_srec_loss = total_srec_loss / num_sents
-                elapsed = time.time() - start_time
-                self.logging(
-                    '| epoch {:2d} | {:5d}/{:5d} batches | {:5.2f} ms/batch | loss {:3.2f} | '
-                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f}'.format(
-                        epoch, step, self.nbatch, elapsed * 1000 / self.log_interval, cur_vae_loss,
-                        cur_rec_loss, cur_kl1_loss, cur_kl2_loss, cur_srec_loss))
-                total_rec_loss = 0
-                total_kl1_loss = 0
-                total_kl2_loss = 0
-                total_srec_loss = 0
-                num_sents = 0
-                num_words = 0
-                start_time = time.time()
-            step += 1
+            # logging after entire training batch
+            # if step % self.log_interval == 0 and step > 0:
+            #     cur_rec_loss = total_rec_loss / num_sents
+            #     cur_kl1_loss = total_kl1_loss / num_sents
+            #     cur_kl2_loss = total_kl2_loss / num_sents
+            #     cur_vae_loss = cur_rec_loss + beta1 * cur_kl1_loss + beta2 * cur_kl2_loss
+            #     cur_srec_loss = total_srec_loss / num_sents
+            #     cur_reg_loss = 0
+            #     elapsed = time.time() - start_time
+                # self.logging(
+                #     '| epoch {:2d} | {:5d}/{:5d} batches | {:5.2f} ms/batch | vae loss {:3.2f} | '
+                #     'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f}'.format(
+                #         epoch, step, self.nbatch, elapsed * 1000 / self.log_interval, cur_vae_loss,
+                #         cur_rec_loss, cur_kl1_loss, cur_kl2_loss, cur_srec_loss))                
+            #     total_rec_loss = 0
+            #     total_kl1_loss = 0
+            #     total_kl2_loss = 0
+            #     total_srec_loss = 0
+            #     num_sents = 0
+            #     num_words = 0
+            #     start_time = time.time()
+
+            # step += 1
+        
+        loss_weighted = total_loss / num_sents
+        vae_weighted = total_vae_loss / num_sents
+        rec = total_rec_loss / num_sents
+        kl1 = total_kl1_loss / num_sents
+        kl2 = total_kl2_loss / num_sents
+        srec = total_srec_loss / num_sents
+        reg = total_reg_loss / num_sents
+
+        loss_metrics = {
+            "loss_weighted": loss_weighted,
+            "vae_weighted": vae_weighted,
+            "rec": rec,
+            "kl1": kl1,
+            "kl2": kl2,
+            "srec": srec,
+            "reg": reg,
+        }
+        self.logging(
+                    '| train metrics of epoch {:2d} | loss weighted {:3.2f} | vae weighted {:3.2f} | '
+                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
+                        epoch, loss_weighted, vae_weighted, 
+                        rec, kl1, kl2, srec, reg)) 
+        for k, v in loss_metrics.items():
+            self.writer.add_scalar(f"Train/{k}", v, epoch)
+
 
     def evaluate(self, eval_data, eval_feat):
         self.vae.eval()
@@ -249,7 +287,7 @@ class DecomposedVAE:
             self.train(epoch)
             val_loss = self.evaluate(self.valid_data, self.valid_feat)
 
-            vae_loss = val_loss[1]
+            vae_loss = val_loss[1]  # emphasise reconstruction loss
 
             if self.aggressive:
                 cur_mi = val_loss[4]
@@ -281,8 +319,8 @@ class DecomposedVAE:
                 break
 
             self.logging('-' * 75)
-            self.logging('| end of epoch {:2d} | time {:5.2f}s | '
-                         'kl_weight {:.2f} | vae_lr {:.2f} | loss {:3.2f}'.format(
+            self.logging('| val metrics of epoch {:2d} | time {:5.2f}s | '
+                         'kl_weight {:.2f} | vae_lr {:.2f} | vae {:3.2f}'.format(
                              epoch, (time.time() - epoch_start_time),
                              self.kl_weight, self.opt_dict["lr"], val_loss[0]))
             self.logging('| recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | '
@@ -290,6 +328,13 @@ class DecomposedVAE:
                              val_loss[1], val_loss[2], val_loss[3],
                              val_loss[4], val_loss[5]))
             self.logging('-' * 75)
+            
+            val_loss_names = ["vae", "recon", "kl1", "kl2", "mi1", "mi2"]
+            assert len(val_loss_names) == len(val_loss)
+            for i in range(len(val_loss_names)):
+                name = val_loss_names[i]
+                metric = val_loss[i]
+                self.writer.add_scalar(f"Val/{name}", metric , epoch)
 
         return best_loss
 

@@ -14,10 +14,11 @@ import time
 import config
 from models.decomposed_vae import DecomposedVAE
 import numpy as np
+from tensorboardX import SummaryWriter
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name)
+    data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     # data_pth = "data/%s" % args.data_name
     train_data_pth = os.path.join(data_pth, "train_data.txt")
     train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
@@ -40,6 +41,7 @@ def main(args):
 
     save_path = '{}-{}-{}'.format(args.save, args.data_name, args.feat)
     save_path = os.path.join(args.hard_disk_dir, save_path, time.strftime("%Y%m%d-%H%M%S"))
+    writer = SummaryWriter(save_path)
     scripts_to_save = [
         'run.py', 'models/decomposed_vae.py', 'models/vae.py',
         'models/base_network.py', 'config.py']
@@ -66,6 +68,7 @@ def main(args):
         "save_path": save_path,
         "logging": logging,
         "text_only": args.text_only,
+        "writer": writer,
     }
     params = conf["params"]
     params["vae_params"]["vocab"] = vocab
