@@ -110,6 +110,7 @@ class DecomposedVAE(nn.Module):
         return outputs, KL1, KL2, reg_ic
 
     def calc_mi_q(self, x, feat):
+        # TODO: no idea whats mi1, mi2
         mi1 = self.lstm_encoder.calc_mi(x)
         mi2 = self.mlp_encoder.calc_mi(feat)
         return mi1, mi2

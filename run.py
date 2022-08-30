@@ -87,11 +87,20 @@ def main(args):
     model.load(save_path)
     test_loss = model.evaluate(model.test_data, model.test_feat)
     logging("test loss: {}".format(test_loss[0]))
-    logging("test recon: {}".format(test_loss[1]))
-    logging("test kl1: {}".format(test_loss[2]))
-    logging("test kl2: {}".format(test_loss[3]))
-    logging("test mi1: {}".format(test_loss[4]))
-    logging("test mi2: {}".format(test_loss[5]))
+
+    loss_metrics = {
+            "Overall loss": test_loss[0],
+            "vae": test_loss[1],
+            "rec": test_loss[2],
+            "kl1": test_loss[3],
+            "kl2": test_loss[4],
+            "mi1": test_loss[5],
+            "mi2": test_loss[6],
+            "srec": test_loss[7],
+            "reg": test_loss[8],
+        }
+    for k, v in loss_metrics.items():
+        writer.add_scalar(f"Test/{k}", v, 1)
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp',

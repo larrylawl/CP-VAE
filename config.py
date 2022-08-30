@@ -78,7 +78,7 @@ CONFIG["gyafc"] = {
     "label": True,
     "params": {
         "log_interval": 2000,
-        "num_epochs": 1,
+        "num_epochs": 100,
         "enc_lr": 1e-3,
         "dec_lr": 1.0,
         "warm_up": 10,
