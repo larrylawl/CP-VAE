@@ -17,3 +17,4 @@
 data/*
 scripts/
 plot_gp/*
+.ipynb_checkpoints/*

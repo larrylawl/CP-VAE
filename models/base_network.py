@@ -71,10 +71,12 @@ class GaussianEncoderBase(nn.Module):
     def encode(self, inputs, nsamples=1):
         mu, logvar = self.forward(inputs)
         z = self.reparameterize(mu, logvar, nsamples)
+        # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
         return z, KL
 
     def reparameterize(self, mu, logvar, nsamples=1):
+        # NOTE: reparameterization trick
         batch_size, nz = mu.size()
         std = logvar.mul(0.5).exp()
 
@@ -179,6 +181,7 @@ class SemLSTMEncoder(GaussianEncoderBase):
         emb_init(self.embed.weight)
 
     def encode_var(self, inputs, return_p=False):
+        # Equation 3
         logits = self.var_linear(inputs)
         prob = F.softmax(logits, -1)
         if return_p:
@@ -222,6 +225,7 @@ class SemMLPEncoder(GaussianEncoderBase):
             model_init(param)
 
     def encode_var(self, inputs, return_p=False):
+        # NOTE: Equation 3
         logits = self.var_linear(inputs)
         prob = F.softmax(logits, -1)
         if return_p:
@@ -229,6 +233,7 @@ class SemMLPEncoder(GaussianEncoderBase):
         return torch.matmul(prob, self.var_embedding)
 
     def orthogonal_regularizer(self, norm=100):
+        # NOTE: Equation 6
         tmp = torch.mm(self.var_embedding, self.var_embedding.permute(1, 0))
         return torch.norm(tmp - norm * torch.diag(torch.ones(self.n_vars, device=self.device)), 2)
 

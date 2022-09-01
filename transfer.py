@@ -50,6 +50,7 @@ def main(args):
         "save_path": args.load_path,
         "logging": None,
         "text_only": args.text_only,
+        "writer": None
     }
     params = conf["params"]
     params["vae_params"]["vocab"] = vocab
@@ -88,8 +89,8 @@ def main(args):
         neg_sample = dev_feat[:10]
         neg_inputs = torch.tensor(
             neg_sample, dtype=torch.float, requires_grad=False, device=device)
-    r, _ = model.vae.mlp_encoder(neg_inputs, True)
-    p = model.vae.get_var_prob(r).mean(0, keepdim=True)
+    r, _ = model.vae.mlp_encoder(neg_inputs, True)  # encoded mean
+    p = model.vae.get_var_prob(r).mean(0, keepdim=True)  # equation 3's p
     neg_idx = torch.max(p, 1)[1].item()
 
     if args.text_only:
@@ -139,12 +140,16 @@ def main(args):
             label = test_data.labels[idx]
             _idx = idx + bsz if label else min(idx + bsz, sep_id)
             _idx = min(_idx, n_samples)
-            var_id = neg_idx if label else pos_idx  # id of the basis vector
+            var_id = neg_idx if label else pos_idx  # id of the basis vector NOTE: need change if |label|>2
             text, _ = test_data._to_tensor(
                 test_data.data[idx:_idx], batch_first=False, device=device)
             feat = torch.tensor(test_feat[idx:_idx], dtype=torch.float, requires_grad=False, device=device)
-            z1, _ = model.vae.lstm_encoder(text[:min(text.shape[0], 10)])  # content
-            ori_z2, _ = model.vae.mlp_encoder(feat)  # original style
+            z1, _ = model.vae.encode_syntax(text[:min(text.shape[0], 10)])
+            ori_z2, _ = model.vae.encode_semantic(feat)
+            z1 = z1.squeeze()
+            ori_z2 = ori_z2.squeeze()
+            # z1, _ = model.vae.lstm_encoder(text[:min(text.shape[0], 10)])  # content
+            # ori_z2, _ = model.vae.mlp_encoder(feat)  # original style
             tra_z2 = model.vae.mlp_encoder.var_embedding[var_id:var_id + 1, :].expand(
                 _idx - idx, -1)  # fixed to target style (pos or neg)
             texts = model.vae.decoder.beam_search_decode(z1, tra_z2)
