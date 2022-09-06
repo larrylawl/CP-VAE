@@ -16,6 +16,7 @@ class GYAFCDataset(Dataset):
         self.labels = task_labels
         self.rec_labels = rec_labels
         self.sents = sents
+        self.labels_type = self.get_labels_type()
 
     def __getitem__(self, idx):
         item = {}
@@ -43,8 +44,12 @@ class GYAFCDataset(Dataset):
     def __len__(self):
         return len(self.labels)
 
+    def get_labels_type(self):
+        labels_list = [l.item() for l in self.labels]
+        return set(labels_list)
+
     def get_subset_specified_labels(self, label, nsamples=10):
-        assert label in self.labels
+        assert label in self.labels_type
         idxs = []
         for i,l in enumerate(self.labels):
             if len(idxs) == nsamples:

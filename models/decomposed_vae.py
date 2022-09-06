@@ -64,6 +64,9 @@ class DecomposedVAE:
 
     def train(self, epoch):
         self.vae.train()
+        self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
+        beta1 = self.beta1 if self.beta1 else self.kl_weight
+        beta2 = self.beta2 if self.beta2 else self.kl_weight
 
         total_rec_loss = 0
         total_kl1_loss = 0
@@ -91,8 +94,8 @@ class DecomposedVAE:
             reg_loss = reg_loss * self.reg_weight
 
             rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
-            kl1_loss = kl1_loss * self.beta1
-            kl2_loss = kl2_loss * self.beta2
+            kl1_loss = kl1_loss * beta1
+            kl2_loss = kl2_loss * beta2
             vae_loss = rec_loss + kl1_loss + kl2_loss
             vae_loss = vae_loss.mean()
 
@@ -140,6 +143,9 @@ class DecomposedVAE:
     def evaluate(self, split="Val", epoch=0):
         self.vae.eval()
 
+        beta1 = self.beta1 if self.beta1 else self.kl_weight
+        beta2 = self.beta2 if self.beta2 else self.kl_weight
+
         with torch.no_grad():
             total_rec_loss = 0
             total_kl1_loss = 0
@@ -168,8 +174,8 @@ class DecomposedVAE:
                 reg_loss = reg_loss * self.reg_weight
 
                 rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
-                kl1_loss = kl1_loss * self.beta1
-                kl2_loss = kl2_loss * self.beta2
+                kl1_loss = kl1_loss * beta1
+                kl2_loss = kl2_loss * beta2
                 vae_loss = rec_loss + kl1_loss + kl2_loss
                 vae_loss = vae_loss.mean()
 
@@ -213,7 +219,6 @@ class DecomposedVAE:
         best_loss = 1e4
         decay_cnt = 0
         for epoch in range(1, self.num_epochs + 1):
-            epoch_start_time = time.time()
             self.train(epoch)
             val_loss = self.evaluate(epoch=epoch, split="Val")
 

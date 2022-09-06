@@ -25,7 +25,7 @@ class BertForLatentConnector(GaussianEncoderBase):
         cls = outputs.last_hidden_state[:, 0, :]
         mean, logvar = self.linear(cls).chunk(2, -1)
 
-        if self.have_map and not to_map:
+        if self.have_map and to_map:
             mean, prob = self.encode_var(mean)
 
             if return_p: 
@@ -39,7 +39,7 @@ class BertForLatentConnector(GaussianEncoderBase):
         prob = nn.Softmax(dim=-1)(logits)
         return torch.matmul(prob, self.var_embedding), prob
     
-    # TODO: not sure why original norm is 100
+    # TODO: not sure why original norm is 100. shouldn't it be 1
     def orthogonal_regularizer(self, norm=100):
         # NOTE: Equation 6 in CPVAE
         tmp = torch.mm(self.var_embedding, self.var_embedding.transpose(1, 0))

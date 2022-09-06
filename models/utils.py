@@ -8,6 +8,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import trange
 
 def log_sum_exp(value, dim=None, keepdim=False):
     if dim is not None:

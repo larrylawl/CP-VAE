@@ -22,31 +22,24 @@ CONFIG["gyafc"] = {
         "enc_lr": 5e-5,
         "dec_lr": 5e-5,
         "warm_up": 10,
-        "kl_start": 0.1,
-        "beta1": 0.35,
-        "beta2": 0.2,
+        "kl_start": 0,
+        "beta1": 0,  # use annealing kl weight
+        "beta2": 0,  # use annealing kl weight
         "srec_weight": 2, # original: 1
-        "reg_weight": 0.05, # original: 1
+        "reg_weight": 0.01, # original: 1
         "ic_weight": 0.0,
         "aggressive": False,
         "vae_params": {
-            "syn_nz": 16,
-            "sem_nz": 64,
+            "syn_nz": 64,
+            "sem_nz": 16,
             "n_vars": 3,
             "enc_name": "distilbert-base-uncased",
             "dec_name": "gpt2",
+            "top_k": 5,
+            "top_p": 0,
+            "temp": 1.0,
+            "max_len": 30,
         },
-        # "vae_params": {
-        #     "lstm_ni": 256,
-        #     "lstm_nh": 1024,
-        #     "lstm_nz": 64,
-        #     "mlp_nz": 16,
-        #     "dec_ni": 128,
-        #     "dec_nh": 1024,
-        #     "dec_dropout_in": 0.5,
-        #     "dec_dropout_out": 0.5,
-        #     "n_vars": 3,
-        # }
     }
 }
 
