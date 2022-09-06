@@ -13,9 +13,11 @@ from .vae import DecomposedVAE as VAE
 import numpy as np
 import time
 import os
+from tqdm import tqdm
+from copy import copy
 
 class DecomposedVAE:
-    def __init__(self, train, valid, test, feat, bsz, save_path, logging, writer, log_interval, num_epochs,
+    def __init__(self, train, valid, test, bsz, save_path, logging, writer, log_interval, num_epochs,
                  enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, srec_weight, reg_weight, ic_weight,
                  aggressive, text_only, vae_params):
         super(DecomposedVAE, self).__init__()
@@ -41,29 +43,221 @@ class DecomposedVAE:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.text_only = text_only
-        if self.text_only:
-            self.train_data, self.train_feat = train, train
-            self.valid_data, self.valid_feat = valid, valid
-            self.test_data, self.test_feat = test, test
-        else:
-            self.train_data, self.train_feat = train
-            self.valid_data, self.valid_feat = valid
-            self.test_data, self.test_feat = test
-        self.feat = feat
+        self.train_dl = train
+        self.val_dl = valid
+        self.test_dl = test
 
         self.vae = VAE(**vae_params)
         if self.use_cuda:
             self.vae.cuda()
 
-        self.enc_params = list(self.vae.lstm_encoder.parameters()) + \
-            list(self.vae.mlp_encoder.parameters())
-        self.enc_optimizer = optim.Adam(self.enc_params, lr=self.enc_lr)
-        self.dec_optimizer = optim.SGD(self.vae.decoder.parameters(), lr=self.dec_lr)
+        self.enc_optimizer = optim.Adam(self.vae.get_enc_params(), lr=self.enc_lr)
+        self.dec_optimizer = optim.Adam(self.vae.get_dec_params(), lr=self.dec_lr)
+        # self.enc_params = list(self.vae.lstm_encoder.parameters()) + \
+        #     list(self.vae.mlp_encoder.parameters())
+        # self.dec_optimizer = optim.SGD(self.vae.decoder.parameters(), lr=self.dec_lr)
 
-        self.nbatch = len(self.train_data)
+        self.nbatch = len(self.train_dl)
         self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
 
+        assert not self.aggressive, "Not implemented yet."
+
     def train(self, epoch):
+        self.vae.train()
+
+        total_rec_loss = 0
+        total_kl1_loss = 0
+        total_kl2_loss = 0
+        total_srec_loss = 0
+        total_reg_loss = 0
+        total_vae_loss = 0
+        total_loss = 0
+
+        train_dl_neg = iter(self.train_dl)
+        for batch in tqdm(self.train_dl):
+            
+            enc_ids = batch["enc_input_ids"].to(self.device)
+            enc_am = batch["enc_attention_mask"].to(self.device)
+            dec_ids = batch["dec_input_ids"].to(self.device)
+            rec_labels = batch["rec_labels"].to(self.device)
+
+            batch_neg = next(train_dl_neg)
+            neg_enc_ids = batch_neg["enc_input_ids"].to(self.device)
+            neg_enc_am = batch_neg["enc_attention_mask"].to(self.device)
+
+            srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+            srec_loss = srec_loss * self.srec_weight
+            reg_loss = self.vae.enc_sem.orthogonal_regularizer()
+            reg_loss = reg_loss * self.reg_weight
+
+            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
+            kl1_loss = kl1_loss * self.beta1
+            kl2_loss = kl2_loss * self.beta2
+            vae_loss = rec_loss + kl1_loss + kl2_loss
+            vae_loss = vae_loss.mean()
+
+            loss = vae_loss + srec_loss + reg_loss
+            self.enc_optimizer.zero_grad()
+            self.dec_optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.vae.parameters(), 5.0)
+            self.enc_optimizer.step()
+            self.dec_optimizer.step()
+
+            total_rec_loss += rec_loss.mean().item()
+            total_kl1_loss += kl1_loss.mean().item()
+            total_kl2_loss += kl2_loss.mean().item()
+            total_vae_loss += vae_loss.item()
+            total_reg_loss += reg_loss.item()
+            total_srec_loss += srec_loss.item()
+            total_loss += loss.item()
+            
+        loss = total_loss / self.nbatch
+        vae = total_vae_loss / self.nbatch
+        rec = total_rec_loss / self.nbatch
+        kl1 = total_kl1_loss / self.nbatch
+        kl2 = total_kl2_loss / self.nbatch
+        srec = total_srec_loss / self.nbatch
+        reg = total_reg_loss / self.nbatch
+
+        loss_metrics = {
+            "Overall loss": loss,
+            "vae": vae,
+            "rec": rec,
+            "kl1": kl1,
+            "kl2": kl2,
+            "srec": srec,
+            "reg": reg,
+        }
+        self.logging(
+                    '| train metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
+                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
+                        epoch, loss, vae, 
+                        rec, kl1, kl2, srec, reg)) 
+        for k, v in loss_metrics.items():
+            self.writer.add_scalar(f"Train/{k}", v, epoch)
+
+    def evaluate(self, split="Val", epoch=0):
+        self.vae.eval()
+
+        with torch.no_grad():
+            total_rec_loss = 0
+            total_kl1_loss = 0
+            total_kl2_loss = 0
+            total_srec_loss = 0
+            total_reg_loss = 0
+            total_vae_loss = 0
+            total_loss = 0
+
+            dl = self.val_dl if split == "Val" else self.test_dl
+            dl_neg = iter(dl)
+            
+            for batch in tqdm(dl):
+                enc_ids = batch["enc_input_ids"].to(self.device)
+                enc_am = batch["enc_attention_mask"].to(self.device)
+                dec_ids = batch["dec_input_ids"].to(self.device)
+                rec_labels = batch["rec_labels"].to(self.device)
+
+                batch_neg = next(dl_neg)
+                neg_enc_ids = batch_neg["enc_input_ids"].to(self.device)
+                neg_enc_am = batch_neg["enc_attention_mask"].to(self.device)
+
+                srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+                srec_loss = srec_loss * self.srec_weight
+                reg_loss = self.vae.enc_sem.orthogonal_regularizer()
+                reg_loss = reg_loss * self.reg_weight
+
+                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
+                kl1_loss = kl1_loss * self.beta1
+                kl2_loss = kl2_loss * self.beta2
+                vae_loss = rec_loss + kl1_loss + kl2_loss
+                vae_loss = vae_loss.mean()
+
+                loss = vae_loss + srec_loss + reg_loss
+
+                total_rec_loss += rec_loss.mean().item()
+                total_kl1_loss += kl1_loss.mean().item()
+                total_kl2_loss += kl2_loss.mean().item()
+                total_vae_loss += vae_loss.item()
+                total_reg_loss += reg_loss.item()
+                total_srec_loss += srec_loss.item()
+                total_loss += loss.item()
+            
+        loss = total_loss / self.nbatch
+        vae = total_vae_loss / self.nbatch
+        rec = total_rec_loss / self.nbatch
+        kl1 = total_kl1_loss / self.nbatch
+        kl2 = total_kl2_loss / self.nbatch
+        srec = total_srec_loss / self.nbatch
+        reg = total_reg_loss / self.nbatch
+
+        loss_metrics = {
+            "Overall loss": loss,
+            "vae": vae,
+            "rec": rec,
+            "kl1": kl1,
+            "kl2": kl2,
+            "srec": srec,
+            "reg": reg,
+        }
+        self.logging(
+                    '| {} metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
+                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
+                        split, epoch, loss, vae, 
+                        rec, kl1, kl2, srec, reg)) 
+        for k, v in loss_metrics.items():
+            self.writer.add_scalar(f"{split}/{k}", v, epoch)
+        return loss
+
+    def fit(self):
+        best_loss = 1e4
+        decay_cnt = 0
+        for epoch in range(1, self.num_epochs + 1):
+            epoch_start_time = time.time()
+            self.train(epoch)
+            val_loss = self.evaluate(epoch=epoch, split="Val")
+
+            if self.aggressive:
+                cur_mi = val_loss[5]
+                self.logging("pre mi: %.4f, cur mi:%.4f" % (self.pre_mi, cur_mi))
+                if cur_mi < self.pre_mi:
+                    self.aggressive = False
+                    self.logging("STOP BURNING")
+
+                self.pre_mi = cur_mi
+
+            if val_loss < best_loss:
+                self.save(self.save_path)
+                best_loss = val_loss
+
+            if val_loss > self.opt_dict["best_loss"]:
+                self.opt_dict["not_improved"] += 1
+                if self.opt_dict["not_improved"] >= 2 and epoch >= 5:
+                    self.opt_dict["not_improved"] = 0
+                    self.opt_dict["lr"] = self.opt_dict["lr"] * 0.5
+                    self.load(self.save_path)
+                    decay_cnt += 1
+                    self.dec_optimizer = optim.Adam(self.vae.get_dec_params(), lr=self.opt_dict["lr"])
+            else:
+                self.opt_dict["not_improved"] = 0
+                self.opt_dict["best_loss"] = val_loss
+
+            if decay_cnt == 5:
+                break
+
+        return best_loss
+
+    def save(self, path):
+        self.logging("saving to %s" % path)
+        model_path = os.path.join(path, "model.pt")
+        torch.save(self.vae.state_dict(), model_path)
+
+    def load(self, path):
+        model_path = os.path.join(path, "model.pt")
+        self.vae.load_state_dict(torch.load(model_path))
+
+
+    def oldtrain(self, epoch):
         self.vae.train()
 
         total_rec_loss = 0
@@ -211,7 +405,7 @@ class DecomposedVAE:
             self.writer.add_scalar(f"Train/{k}", v, epoch)
 
 
-    def evaluate(self, eval_data, eval_feat):
+    def oldevaluate(self, eval_data, eval_feat):
         self.vae.eval()
 
         beta1 = self.beta1 if self.beta1 else self.kl_weight
@@ -281,75 +475,3 @@ class DecomposedVAE:
         cur_loss = total_loss / nbatch_eval
         
         return cur_loss, cur_vae_loss, cur_rec_loss, cur_kl1_loss, cur_kl2_loss, cur_mi1, cur_mi2, cur_srec_loss, cur_reg_loss
-
-    def fit(self):
-        best_loss = 1e4
-        decay_cnt = 0
-        for epoch in range(1, self.num_epochs + 1):
-            epoch_start_time = time.time()
-            self.train(epoch)
-            val_loss = self.evaluate(self.valid_data, self.valid_feat)
-
-            loss, vae, rec, kl1, kl2, mi1, mi2, srec, reg = val_loss
-
-            if self.aggressive:
-                cur_mi = val_loss[5]
-                self.logging("pre mi: %.4f, cur mi:%.4f" % (self.pre_mi, cur_mi))
-                if cur_mi < self.pre_mi:
-                    self.aggressive = False
-                    self.logging("STOP BURNING")
-
-                self.pre_mi = cur_mi
-
-            if loss < best_loss:
-                self.save(self.save_path)
-                best_loss = loss
-
-            if loss > self.opt_dict["best_loss"]:
-                self.opt_dict["not_improved"] += 1
-                if self.opt_dict["not_improved"] >= 2 and epoch >= 15:
-                    self.opt_dict["not_improved"] = 0
-                    self.opt_dict["lr"] = self.opt_dict["lr"] * 0.5
-                    self.load(self.save_path)
-                    decay_cnt += 1
-                    self.dec_optimizer = optim.SGD(
-                        self.vae.decoder.parameters(), lr=self.opt_dict["lr"])
-            else:
-                self.opt_dict["not_improved"] = 0
-                self.opt_dict["best_loss"] = loss
-
-            if decay_cnt == 5:
-                break
-
-
-            
-            self.logging(
-                '| Val metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
-                'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | mi1 {:3.2f} | mi2 {:3.2f} | srec {:3.2f} | reg {:3.2f} '.format(
-                    epoch, loss, vae, 
-                    rec, kl1, kl2, mi1, mi2, srec, reg)) 
-                
-            loss_metrics = {
-                "Overall loss": loss,
-                "vae": vae,
-                "rec": rec,
-                "kl1": kl1,
-                "kl2": kl2,
-                "mi1": mi1,
-                "mi2": mi2,
-                "srec": srec,
-                "reg": reg,
-            }
-            for k, v in loss_metrics.items():
-                self.writer.add_scalar(f"Val/{k}", v, epoch)
-
-        return best_loss
-
-    def save(self, path):
-        self.logging("saving to %s" % path)
-        model_path = os.path.join(path, "model.pt")
-        torch.save(self.vae.state_dict(), model_path)
-
-    def load(self, path):
-        model_path = os.path.join(path, "model.pt")
-        self.vae.load_state_dict(torch.load(model_path))

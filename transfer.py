@@ -13,6 +13,11 @@ import argparse
 import numpy as np
 import os
 from utils.dist_utils import cal_log_density
+from torch.utils.data import DataLoader
+from utils.dataset_utils import get_dataset
+from utils.text_utils import get_preprocessor
+from transformers import AutoTokenizer
+from tqdm import tqdm
 
 def get_coordinates(a, b, p):
     pa = p - a
@@ -23,99 +28,181 @@ def get_coordinates(a, b, p):
 
 def main(args):
     conf = config.CONFIG[args.data_name]
-    # data_pth = "data/%s" % args.data_name
+    conf = config.CONFIG[args.data_name]
     data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
-    train_data_pth = os.path.join(data_pth, "train_data.txt")
-    train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
-    train_data = MonoTextData(train_data_pth, True)
-    train_feat = np.load(train_feat_pth)
-    vocab = train_data.vocab
-    dev_data_pth = os.path.join(data_pth, "dev_data.txt")
-    dev_feat_pth = os.path.join(data_pth, "dev_%s.npy" % args.feat)
-    dev_data = MonoTextData(dev_data_pth, True, vocab=vocab)
-    dev_feat = np.load(dev_feat_pth)
-    test_data_pth = os.path.join(data_pth, "test_data.txt")
-    test_feat_pth = os.path.join(data_pth, "test_%s.npy" % args.feat)
-    test_data = MonoTextData(test_data_pth, True, vocab=vocab)
-    test_feat = np.load(test_feat_pth)
+    enc_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["enc_name"])
+    dec_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["dec_name"])
+    # padding for gpt2: # https://huggingface.co/patrickvonplaten/bert2gpt2-cnn_dailymail-fp16#training-script
+    dec_tokenizer.pad_token = dec_tokenizer.unk_token  
+    preprocessor_kwargs = {
+        "data_dir": data_pth,
+        "enc_tokenizer": enc_tokenizer,
+        "dec_tokenizer": dec_tokenizer,
+        "overwrite_cache": args.overwrite_cache,
+        "subset": args.subset,
+    }
+    preprocessor = get_preprocessor(args.data_name)(**preprocessor_kwargs)
+    features = preprocessor.load_features()
+
+    # data_pth = "data/%s" % args.data_name
+    # data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
+    # train_data_pth = os.path.join(data_pth, "train_data.txt")
+    # train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
+    # train_data = MonoTextData(train_data_pth, True)
+    # train_feat = np.load(train_feat_pth)
+    # vocab = train_data.vocab
+    # dev_data_pth = os.path.join(data_pth, "dev_data.txt")
+    # dev_feat_pth = os.path.join(data_pth, "dev_%s.npy" % args.feat)
+    # dev_data = MonoTextData(dev_data_pth, True, vocab=vocab)
+    # dev_feat = np.load(dev_feat_pth)
+    # test_data_pth = os.path.join(data_pth, "test_data.txt")
+    # test_feat_pth = os.path.join(data_pth, "test_%s.npy" % args.feat)
+    # test_data = MonoTextData(test_data_pth, True, vocab=vocab)
+    # test_feat = np.load(test_feat_pth)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # kwargs = {
+    #     "train": ([1], None),
+    #     "valid": (None, None),
+    #     "test": (None, None),
+    #     "feat": None,
+    #     "bsz": 32,
+    #     "save_path": args.load_path,
+    #     "logging": None,
+    #     "text_only": args.text_only,
+    #     "writer": None
+    # }
+
+    ds = get_dataset(args.data_name)
+    train_ds = ds(*features[0])
+    dev_ds = ds(*features[1])
+    test_ds = ds(*features[2])
+
+    dl_params = {"batch_size": conf["bsz"],
+                    "shuffle": True,
+                    "drop_last": True} 
+    train_dl = DataLoader(train_ds, **dl_params)
+    dev_dl = DataLoader(dev_ds, **dl_params)
+    test_dl = DataLoader(test_ds, **dl_params)
     kwargs = {
-        "train": ([1], None),
-        "valid": (None, None),
-        "test": (None, None),
-        "feat": None,
-        "bsz": 32,
+        "train": train_dl,
+        "valid": dev_dl,
+        "test": test_dl,
+        "bsz": conf["bsz"],
         "save_path": args.load_path,
         "logging": None,
         "text_only": args.text_only,
-        "writer": None
+        "writer": None,
     }
+
+
     params = conf["params"]
-    params["vae_params"]["vocab"] = vocab
+    # params["vae_params"]["vocab"] = vocab
     params["vae_params"]["device"] = device
-    params["vae_params"]["text_only"] = args.text_only
-    params["vae_params"]["mlp_ni"] = dev_feat.shape[1]
+    # params["vae_params"]["text_only"] = args.text_only
+    # params["vae_params"]["mlp_ni"] = dev_feat.shape[1]
     kwargs = dict(kwargs, **params)
 
     model = DecomposedVAE(**kwargs)
     model.load(args.load_path)
     model.vae.eval()
 
-    train_data, train_feat = train_data.create_data_batch_feats(32, train_feat, device)
-    print("Collecting training distributions...")
-    mus, logvars = [], []
-    step = 0
-    for batch_data, batch_feat in zip(train_data, train_feat):
-        mu1, logvar1 = model.vae.lstm_encoder(batch_data)
-        mu2, logvar2 = model.vae.mlp_encoder(batch_feat)
-        r, _ = model.vae.mlp_encoder(batch_feat, True)
-        p = model.vae.get_var_prob(r)
-        mu = torch.cat([mu1, mu2], -1)
-        logvar = torch.cat([logvar1, logvar2], -1)
-        mus.append(mu.detach().cpu())
-        logvars.append(logvar.detach().cpu())
-        step += 1
-        if step % 100 == 0:
-            torch.cuda.empty_cache()
-    mus = torch.cat(mus, 0)
-    logvars = torch.cat(logvars, 0)
+    # train_data, train_feat = train_data.create_data_batch_feats(32, train_feat, device)
+    # print("Collecting training distributions...")
+    # mus, logvars = [], []
+    # step = 0
+    # for batch_data, batch_feat in zip(train_data, train_feat):
+    #     mu1, logvar1 = model.vae.lstm_encoder(batch_data)
+    #     mu2, logvar2 = model.vae.mlp_encoder(batch_feat)
+    #     r, _ = model.vae.mlp_encoder(batch_feat, True)
+    #     p = model.vae.get_var_prob(r)
+    #     mu = torch.cat([mu1, mu2], -1)
+    #     logvar = torch.cat([logvar1, logvar2], -1)
+    #     mus.append(mu.detach().cpu())
+    #     logvars.append(logvar.detach().cpu())
+    #     step += 1
+    #     if step % 100 == 0:
+    #         torch.cuda.empty_cache()
+    # mus = torch.cat(mus, 0)
+    # logvars = torch.cat(logvars, 0)
 
-    if args.text_only:
-        neg_sample = dev_data.data[:10]
-        neg_inputs, _ = dev_data._to_tensor(neg_sample, batch_first=False, device=device)
-    else:
-        neg_sample = dev_feat[:10]
-        neg_inputs = torch.tensor(
-            neg_sample, dtype=torch.float, requires_grad=False, device=device)
-    r, _ = model.vae.mlp_encoder(neg_inputs, True)  # encoded mean
-    p = model.vae.get_var_prob(r).mean(0, keepdim=True)  # equation 3's p
-    neg_idx = torch.max(p, 1)[1].item()
+    # for each label, 
+    labels = set(train_ds.labels)
+    label_to_simplex_mapping = {}
+    chosen_p_idx = set()
+    for label in labels:
+        ds = ds.get_subset_specified_labels(label=label, nsamples=16)
+        dl_params = {"batch_size": 16,
+                    "shuffle": True,
+                    "drop_last": True} 
+        dl = DataLoader(ds, **dl_params)
+        batch = next(iter(dl))
+        enc_ids = batch["enc_input_ids"].to(device)
+        enc_am = batch["enc_attention_mask"].to(device)
+        _, _, p = model.vae.enc_sem(enc_ids, enc_am, return_p=True)
+        p = p.mean(0, keepdim=True)
+        topk = p.topk(params["n_vars"], dim=1)
+        for idx in topk[1]:
+            if idx not in chosen_p_idx:
+                chosen_p_idx.add(idx)
+                label_to_simplex_mapping
+        
 
-    if args.text_only:
-        pos_sample = dev_data.data[-10:]
-        pos_inputs, _ = dev_data._to_tensor(pos_sample, batch_first=False, device=device)
-    else:
-        pos_sample = dev_feat[-10:]
-        pos_inputs = torch.tensor(
-            pos_sample, dtype=torch.float, requires_grad=False, device=device)
-    r, _ = model.vae.mlp_encoder(pos_inputs, True)
-    p = model.vae.get_var_prob(r).mean(0, keepdim=True)
+        idx = torch.max(p, 1)[1].item()
+        label_simplex_mapping[label] = idx
+
+        chosen_p_idx.add(idx)
+    
+    informal_dl = DataLoader(informal_ds, **dl_params)
+    batch = next(iter(informal_dl))
+    informal_enc_ids = batch["enc_input_ids"].to(device)
+    informal_enc_am = batch["enc_attention_mask"].to(device)
+    _, _, p = model.vae.enc_sem(informal_enc_ids, informal_enc_am, return_p=True)
+    p = p.mean(0, keepdim=True)
+
+    # r, _ = model.vae.mlp_encoder(neg_inputs, True)  # encoded mean
+    # p = model.vae.get_var_prob(r).mean(0, keepdim=True)  # equation 3's p
+    # neg_idx = torch.max(p, 1)[1].item()
+
+    # if args.text_only:
+    #     pos_sample = dev_data.data[-10:]
+    #     pos_inputs, _ = dev_data._to_tensor(pos_sample, batch_first=False, device=device)
+    # else:
+    #     pos_sample = dev_feat[-10:]
+    #     pos_inputs = torch.tensor(
+    #         pos_sample, dtype=torch.float, requires_grad=False, device=device)
+    # r, _ = model.vae.mlp_encoder(pos_inputs, True)
+    # p = model.vae.get_var_prob(r).mean(0, keepdim=True)
     top2 = torch.topk(p, 2, 1)[1].squeeze()
-    if top2[0].item() == neg_idx:
+    if top2[0].item() == formal_idx:
         print("Collision!!! Use second most as postive.")
-        pos_idx = top2[1].item()
+        informal_idx = top2[1].item()
     else:
-        pos_idx = top2[0].item()
-    other_idx = -1
-    for i in range(3):
-        if i not in [pos_idx, neg_idx]:
-            other_idx = i
-            break
+        informal_idx = top2[0].item()
 
-    print("Negative: %d" % neg_idx)
-    print("Positive: %d" % pos_idx)
+    # for i in range(3):
+    #     if i not in [pos_idx, neg_idx]:
+    #         other_idx = i
+            # break
+
+    print("Informal: %d" % informal_idx)
+    print("Formal: %d" % formal_idx)
+
+    label_simplex_mapping = {
+        ""
+    }
+
+    # transfer to any index that's NOT their own
+    with torch.no_grad():
+        for batch in tqdm(test_dl):
+            enc_ids = batch["enc_input_ids"].to(device)
+            enc_am = batch["enc_attention_mask"].to(device)
+            dec_ids = batch["dec_input_ids"].to(device)
+            rec_labels = batch["rec_labels"].to(device)
+            z1, KL1 = model.encode_semantic(enc_ids, enc_am)
+            z2, KL2 = model.encode_syntax(enc_ids, enc_am)
+
 
     sep_id = -1
     for idx, x in enumerate(test_data.labels):
@@ -181,9 +268,12 @@ def main(args):
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')
     parser.add_argument('--hard_disk_dir', type=str, default='/hdd2/lannliat/CP-VAE')
-    parser.add_argument('--feat', type=str, default='glove')
+    parser.add_argument('--feat', type=str, default='fm')
     parser.add_argument('--load_path', type=str)
     parser.add_argument('--text_only', default=False, action='store_true')
+    parser.add_argument('--overwrite_cache', default=False, action="store_true")
+    parser.add_argument('--subset', default=False, action='store_true')
+    
 
 
 if __name__ == "__main__":

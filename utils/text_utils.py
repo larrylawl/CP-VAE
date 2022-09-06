@@ -5,10 +5,83 @@
 # LICENSE file in the root directory of this source tree.
 #
 
+import os
 import torch
 import numpy as np
+from tqdm import tqdm
+from random import sample
 
 from collections import defaultdict, OrderedDict
+### Ours ###
+
+def get_preprocessor(dataset_name):
+    if "gyafc" == dataset_name:
+        return GYAFCPreprocessor
+    else:
+        raise NotImplementedError
+
+class Preprocessor:
+    def __init__(self, data_dir, enc_tokenizer, dec_tokenizer, overwrite_cache=False, subset=False, subset_count=10000):
+        self.data_dir = data_dir
+        self.enc_tokenizer = enc_tokenizer
+        self.dec_tokenizer = dec_tokenizer
+        self.overwrite_cache = overwrite_cache
+        self.subset = subset
+        self.subset_count = subset_count
+    
+    def load_features(self):
+        raise NotImplementedError("Implement in child class!")
+
+class GYAFCPreprocessor(Preprocessor):
+    def load_features(self):
+        output = []
+
+        train_fp = os.path.join(self.data_dir, "train_data.txt")
+        dev_fp = os.path.join(self.data_dir, "dev_data.txt")
+        test_fp = os.path.join(self.data_dir, "test_data.txt")
+
+        for fp in [train_fp, dev_fp, test_fp]:
+            if not fp: 
+                output.append(([], []))
+                continue
+            root = os.path.splitext(fp)[0]
+            cache_fn = f"{root}.pkl" if not self.subset else f"{root}_subset.pkl"
+            if os.path.isfile(cache_fn) and not self.overwrite_cache:
+                print(f"Loading cached encodings and labels: {fp}")
+                output.append(torch.load(cache_fn))
+            else: # create from scratch
+                print(f"Creating encodings and labels: {fp}")
+                dataset_sents = []
+                dataset_task_labels = []
+
+                with open(fp, "r", encoding="utf-8") as inf:
+                    for line in tqdm(inf):
+                        label, sent = line.split("\t", 1)
+                        label = int(label)
+                        dataset_sents.append(sent)
+                        dataset_task_labels.append(label)
+                
+                if self.subset and self.subset_count < len(dataset_task_labels):
+                    idxs = set(sample(range(0, len(dataset_task_labels)), self.subset_count))
+                    dataset_task_labels = [x for i, x in enumerate(dataset_task_labels) if i in idxs]
+                    dataset_sents = [x for i, x in enumerate(dataset_sents) if i in idxs]
+
+                enc_encodings = self.enc_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
+                dec_encodings = self.dec_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
+                dataset_task_labels = torch.tensor(dataset_task_labels)
+                # ensures correct reconstruction loss for GPT with padding
+                # read more here: https://github.com/huggingface/transformers/issues/2630
+                # CEL's ignore index is default -100
+                dataset_rec_labels = torch.where(dec_encodings["attention_mask"] == 1, dec_encodings["input_ids"], -100)
+
+                cached = (enc_encodings, dec_encodings, dataset_task_labels, dataset_rec_labels, dataset_sents)
+                torch.save(cached, cache_fn)
+                output.append(cached)
+
+        return output
+
+
+### Original code ###
 
 class VocabEntry(object):
     def __init__(self, vocab_size=100000):

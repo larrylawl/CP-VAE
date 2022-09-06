@@ -10,11 +10,14 @@
 #################################################################################################
 
 
+from models.bert_enc import BertForLatentConnector
 import torch
 import torch.nn as nn
 
 from .utils import uniform_initializer, value_initializer, gumbel_softmax
 from .base_network import LSTMEncoder, LSTMDecoder, SemMLPEncoder, SemLSTMEncoder
+from itertools import chain
+from .pytorch_transformers.modeling_gpt2 import GPT2ForLatentConnector, GPT2Config
 
 class VAE(nn.Module):
     def __init__(self, ni, nz, enc_nh, dec_nh, dec_dropout_in, dec_dropout_out, vocab, device):
@@ -46,13 +49,46 @@ class VAE(nn.Module):
         return self.encoder.calc_mi(x)
 
 class DecomposedVAE(nn.Module):
+    def __init__(self, enc_name, dec_name, syn_nz, sem_nz, n_vars, device):
+        super(DecomposedVAE, self).__init__()
+        self.enc_syn = BertForLatentConnector(syn_nz, enc_name)
+        self.enc_sem = BertForLatentConnector(sem_nz, device=device, name=enc_name, have_map=True, n_vars=n_vars)
+        self.dec_nz = syn_nz + sem_nz
+        decoder_config = GPT2Config.from_pretrained(dec_name)
+        setattr(decoder_config, "latent_size", self.dec_nz)
+        self.dec = GPT2ForLatentConnector.from_pretrained(dec_name, config=decoder_config, latent_size=self.dec_nz, latent_as_gpt_emb=False)
+        self.device = device
+
+    def loss(self, enc_ids, enc_attn_mask, dec_ids, rec_labels, nsamples=1):
+        z1, KL1 = self.encode_semantic(enc_ids, enc_attn_mask, nsamples)
+        z2, KL2 = self.encode_syntax(enc_ids, enc_attn_mask, nsamples)
+        z = torch.cat([z1, z2], -1).squeeze()
+        op = self.dec(input_ids=dec_ids, past=z, labels=rec_labels, label_ignore=-100)
+        rec_loss = op[0]
+        return rec_loss, KL1, KL2
+        
+    def encode_syntax(self, x, enc_attn_mask, nsamples=1):
+        return self.enc_syn.encode(x, enc_attn_mask, nsamples)
+
+    def encode_semantic(self, x, enc_attn_mask, nsamples=1):
+        return self.enc_sem.encode(x, enc_attn_mask, nsamples)
+
+    def get_enc_params(self):
+        return chain(self.enc_syn.parameters(), self.enc_sem.parameters())
+
+    def get_dec_params(self):
+        return self.dec.parameters()
+
+
+class OldDecomposedVAE(nn.Module):
     def __init__(self, lstm_ni, lstm_nh, lstm_nz, mlp_ni, mlp_nz,
                  dec_ni, dec_nh, dec_dropout_in, dec_dropout_out,
                  vocab, n_vars, device, text_only):
-        super(DecomposedVAE, self).__init__()
+        super(OldDecomposedVAE, self).__init__()
         model_init = uniform_initializer(0.01)
         enc_embed_init = uniform_initializer(0.1)
         dec_embed_init = uniform_initializer(0.1)
+        
         self.lstm_encoder = LSTMEncoder(
             lstm_ni, lstm_nh, lstm_nz, len(vocab), model_init, enc_embed_init)
         if text_only:
@@ -75,8 +111,8 @@ class DecomposedVAE(nn.Module):
         return self.decoder(x, z)
 
     def var_loss(self, pos, neg, neg_samples):
-        r, _ = self.mlp_encoder(pos, True)
-        pos = self.mlp_encoder.encode_var(r)
+        r, _ = self.mlp_encoder(pos, True)  # mu not mapped
+        pos = self.mlp_encoder.encode_var(r)  # mu
         pos_scores = (pos * r).sum(-1)
         pos_scores = pos_scores / torch.norm(r, 2, -1)
         pos_scores = pos_scores / torch.norm(pos, 2, -1)

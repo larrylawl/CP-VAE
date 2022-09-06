@@ -5,8 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 #
 
+from utils.dataset_utils import get_dataset
 from utils.exp_utils import create_exp_dir
-from utils.text_utils import MonoTextData
+from utils.text_utils import get_preprocessor
+from transformers import AutoTokenizer
 import argparse
 import os
 import torch
@@ -15,28 +17,25 @@ import config
 from models.decomposed_vae import DecomposedVAE
 import numpy as np
 from tensorboardX import SummaryWriter
+from torch.utils.data import DataLoader
 
 def main(args):
+    start_time = time.time()
     conf = config.CONFIG[args.data_name]
     data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
-    # data_pth = "data/%s" % args.data_name
-    train_data_pth = os.path.join(data_pth, "train_data.txt")
-    train_feat_pth = os.path.join(data_pth, "train_%s.npy" % args.feat)
-    train_data = MonoTextData(train_data_pth, True)
-    train_feat = np.load(train_feat_pth)
-
-    vocab = train_data.vocab
-    print('Vocabulary size: %d' % len(vocab))
-
-    dev_data_pth = os.path.join(data_pth, "dev_data.txt")
-    dev_feat_pth = os.path.join(data_pth, "dev_%s.npy" % args.feat)
-    dev_data = MonoTextData(dev_data_pth, True, vocab=vocab)
-    dev_feat = np.load(dev_feat_pth)
-    test_data_pth = os.path.join(data_pth, "test_data.txt")
-    test_feat_pth = os.path.join(data_pth, "test_%s.npy" % args.feat)
-    test_data = MonoTextData(test_data_pth, True, vocab=vocab)
-    test_feat = np.load(test_feat_pth)
-
+    enc_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["enc_name"])
+    dec_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["dec_name"])
+    # padding for gpt2: # https://huggingface.co/patrickvonplaten/bert2gpt2-cnn_dailymail-fp16#training-script
+    dec_tokenizer.pad_token = dec_tokenizer.unk_token  
+    preprocessor_kwargs = {
+        "data_dir": data_pth,
+        "enc_tokenizer": enc_tokenizer,
+        "dec_tokenizer": dec_tokenizer,
+        "overwrite_cache": args.overwrite_cache,
+        "subset": args.subset,
+    }
+    preprocessor = get_preprocessor(args.data_name)(**preprocessor_kwargs)
+    features = preprocessor.load_features()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     save_path = '{}-{}-{}'.format(args.save, args.data_name, args.feat)
@@ -48,33 +47,43 @@ def main(args):
     logging = create_exp_dir(save_path, scripts_to_save=scripts_to_save,
                              debug=args.debug)
 
-    if args.text_only:
-        train = train_data.create_data_batch(args.bsz, device)
-        dev = dev_data.create_data_batch(args.bsz, device)
-        test = test_data.create_data_batch(args.bsz, device)
-        feat = train
-    else:
-        train = train_data.create_data_batch_feats(args.bsz, train_feat, device)
-        dev = dev_data.create_data_batch_feats(args.bsz, dev_feat, device)
-        test = test_data.create_data_batch_feats(args.bsz, test_feat, device)
-        feat = train_feat
+    ds = get_dataset(args.data_name)
+    train_ds = ds(*features[0])
+    dev_ds = ds(*features[1])
+    test_ds = ds(*features[2])
+    dl_params = {"batch_size": conf["bsz"],
+                    "shuffle": True,
+                    "drop_last": True} 
+    train_dl = DataLoader(train_ds, **dl_params)
+    dev_dl = DataLoader(dev_ds, **dl_params)
+    test_dl = DataLoader(test_ds, **dl_params)
+
+    # if args.text_only:
+    #     train = train_data.create_data_batch(args.bsz, device)
+    #     dev = dev_data.create_data_batch(args.bsz, device)
+    #     test = test_data.create_data_batch(args.bsz, device)
+    #     feat = train
+    # else:
+    #     train = train_data.create_data_batch_feats(args.bsz, train_feat, device)
+    #     dev = dev_data.create_data_batch_feats(args.bsz, dev_feat, device)
+    #     test = test_data.create_data_batch_feats(args.bsz, test_feat, device)
+    #     feat = train_feat
 
     kwargs = {
-        "train": train,
-        "valid": dev,
-        "test": test,
-        "feat": feat,
-        "bsz": args.bsz,
+        "train": train_dl,
+        "valid": dev_dl,
+        "test": test_dl,
+        "bsz": conf["bsz"],
         "save_path": save_path,
         "logging": logging,
         "text_only": args.text_only,
         "writer": writer,
     }
     params = conf["params"]
-    params["vae_params"]["vocab"] = vocab
+    # params["vae_params"]["vocab"] = vocab
     params["vae_params"]["device"] = device
-    params["vae_params"]["text_only"] = args.text_only
-    params["vae_params"]["mlp_ni"] = train_feat.shape[1]
+    # params["vae_params"]["text_only"] = args.text_only
+    # params["vae_params"]["mlp_ni"] = train_feat.shape[1]
     kwargs = dict(kwargs, **params)
 
     model = DecomposedVAE(**kwargs)
@@ -85,22 +94,10 @@ def main(args):
         logging("Exiting from training early")
 
     model.load(save_path)
-    test_loss = model.evaluate(model.test_data, model.test_feat)
-    logging("test loss: {}".format(test_loss[0]))
-
-    loss_metrics = {
-            "Overall loss": test_loss[0],
-            "vae": test_loss[1],
-            "rec": test_loss[2],
-            "kl1": test_loss[3],
-            "kl2": test_loss[4],
-            "mi1": test_loss[5],
-            "mi2": test_loss[6],
-            "srec": test_loss[7],
-            "reg": test_loss[8],
-        }
-    for k, v in loss_metrics.items():
-        writer.add_scalar(f"Test/{k}", v, 1)
+    test_loss = model.evaluate(split="Test")
+    logging("test loss: {}".format(test_loss))
+    end_time = time.time() - start_time
+    logging("total time taken: {}".format(end_time))
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp',
@@ -114,8 +111,11 @@ def add_args(parser):
                         help='use text only without feats')
     parser.add_argument('--debug', default=False, action='store_true',
                         help='enable debug mode')
-    parser.add_argument('--feat', type=str, default='glove',
+    parser.add_argument('--subset', default=False, action='store_true')
+    parser.add_argument('--feat', type=str, default='fm',
                         help='feat repr')
+    parser.add_argument('--overwrite_cache', default=False, action="store_true")
+    
 
 
 if __name__ == "__main__":

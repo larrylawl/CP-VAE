@@ -17,6 +17,7 @@ import math
 from .utils import log_sum_exp
 import numpy as np
 from scipy.stats import ortho_group
+from transformers import AutoModel, AutoConfig, AutoModelForCausalLM
 
 class BeamSearchNode(object):
     def __init__(self, hiddenstate, previousNode, wordId, logProb, length):
@@ -68,8 +69,8 @@ class GaussianEncoderBase(nn.Module):
         z = self.reparameterize(mu, logvar, nsamples)
         return z, (mu, logvar)
 
-    def encode(self, inputs, nsamples=1):
-        mu, logvar = self.forward(inputs)
+    def encode(self, inputs, attn_mask=None, nsamples=1):
+        mu, logvar = self.forward(inputs, attn_mask)
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
