@@ -37,7 +37,7 @@ CONFIG["gyafc"] = {
             "dec_name": "gpt2",
             "top_k": 5,
             "top_p": 0,
-            "temp": 1.0,
+            "temp": 1.0, # higher: more random
             "max_len": 30,
         },
     }

@@ -83,14 +83,21 @@ class DecomposedVAE(nn.Module):
     def get_dec_params(self):
         return self.dec.parameters()
 
-    def sample_sequence_conditional_batch(self, past):
+    def get_bos_token_id_tensor(self, bsz):
+        op = self.dec_config.bos_token_id
+        op = torch.tensor(op, dtype=torch.long, device=self.device)
+        op = op.unsqueeze(0).repeat(bsz, 1)
+        return op
+
+    def sample_sequence_conditional_batch(self, context, past):
         # context: a single id of <BOS>
         # past: (B, past_seq_len dim_h)
-        context = self.dec_config.bos_token_id
-        num_samples = past.size(0)
-        context = torch.tensor(context, dtype=torch.long, device=past.device)
-        context = context.unsqueeze(0).repeat(num_samples, 1)
-        generated = context # (B, 1)
+        generated = context
+        # context = self.dec_config.bos_token_id
+        # num_samples = past.size(0)
+        # context = torch.tensor(context, dtype=torch.long, device=past.device)
+        # context = context.unsqueeze(0).repeat(num_samples, 1)
+        # generated = context # (B, 1)
 
         # with torch.no_grad():
         while generated.size(-1) < self.max_len:
@@ -146,9 +153,6 @@ class DecomposedVAE(nn.Module):
             logits.masked_fill_(logits[indices_to_remove], filter_value)
 
         return logits 
-
-    def decode(generated):
-        pass
 
 
 class OldDecomposedVAE(nn.Module):

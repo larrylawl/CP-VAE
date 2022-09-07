@@ -176,7 +176,7 @@ def main(args):
     dl_params = {"batch_size": conf["bsz"],
                     "shuffle": False,
                     "drop_last": False} 
-    with open(os.path.join(args.load_path, 'generated_results.txt'), "w") as f:
+    with open(os.path.join(args.load_path, 'generated_results_2.txt'), "w") as f:
         with torch.no_grad():
             # repeat for all label
             for label_type in test_ds.labels_type:
@@ -185,6 +185,7 @@ def main(args):
                 for batch in tqdm(dl):
                     enc_ids = batch["enc_input_ids"].to(device)
                     enc_am = batch["enc_attention_mask"].to(device)
+                    dec_ids = batch["dec_input_ids"].to(device)
                     z1, _ = model.vae.encode_semantic(enc_ids, enc_am)
                     z2, _ = model.vae.encode_syntax(enc_ids, enc_am)
 
@@ -196,10 +197,13 @@ def main(args):
                             break
                     tra_z1 = model.vae.enc_sem.var_embedding[idx, :].expand(z2.size(1), -1)
                     z = torch.cat([tra_z1, z2.squeeze()], -1)
-                    generated = model.vae.sample_sequence_conditional_batch(past=z)
+                    generated = model.vae.sample_sequence_conditional_batch(context=dec_ids[:, 0] ,past=z)
                     generated = dec_tokenizer.batch_decode(generated, skip_special_tokens=True)
                     # for debugging
                     # pre_generated = enc_tokenizer.batch_decode(enc_ids, skip_special_tokens=True)
+                    # print(f"generated: {generated}")
+                    # print(f"pre_generated: {pre_generated}")
+                    exit(1)
                     for text in generated:
                         f.write("%d\t%s\n" % (tra_label, process_transferred(text)))
 
