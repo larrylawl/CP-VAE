@@ -10,13 +10,14 @@ def get_dataset(dataset_name):
 class GYAFCDataset(Dataset):
     "Follows: https://huggingface.co/transformers/v3.2.0/custom_datasets.html"
 
-    def __init__(self, enc_encs, dec_encs, task_labels, rec_labels, sents):
+    def __init__(self, enc_encs, dec_encs, task_labels, rec_labels, sents, sent_embs):
         self.enc_encs = enc_encs
         self.dec_encs = dec_encs
         self.labels = task_labels
         self.rec_labels = rec_labels
         self.sents = sents
         self.labels_type = self.get_labels_type()
+        self.sent_embs = sent_embs
 
     def __getitem__(self, idx):
         item = {}
@@ -28,6 +29,7 @@ class GYAFCDataset(Dataset):
 
         item['labels'] = self.labels[idx]
         item["rec_labels"] = self.rec_labels[idx]
+        item["sent_embs"] = self.sent_embs[idx]
         
         # item = {
         #     "labels": self.labels[idx]

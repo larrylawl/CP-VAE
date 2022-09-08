@@ -70,7 +70,7 @@ class GaussianEncoderBase(nn.Module):
         return z, (mu, logvar)
 
     def encode(self, inputs, attn_mask=None, nsamples=1):
-        mu, logvar = self.forward(inputs, attn_mask)
+        mu, logvar = self.forward(inputs, attn_mask) if attn_mask is not None else self.forward(inputs)
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
@@ -219,6 +219,7 @@ class SemMLPEncoder(GaussianEncoderBase):
         self.var_embedding = nn.Parameter(torch.zeros((n_vars, nz)))
 
         self.var_linear = nn.Linear(nz, n_vars)
+
         self.reset_parameters(model_init)
 
     def reset_parameters(self, model_init):
@@ -238,11 +239,38 @@ class SemMLPEncoder(GaussianEncoderBase):
         tmp = torch.mm(self.var_embedding, self.var_embedding.permute(1, 0))
         return torch.norm(tmp - norm * torch.diag(torch.ones(self.n_vars, device=self.device)), 2)
 
-    def forward(self, inputs, return_origin=False):
+    def oldforward(self, inputs, return_origin=False):
         mean, logvar = self.output(inputs).chunk(2, -1)
         if return_origin:
             return mean, logvar
         return self.encode_var(mean), logvar
+    
+    def forward(self, inputs, return_p=False, to_map=True):
+        if return_p: assert to_map
+
+        mean, logvar = self.output(inputs).chunk(2, -1)
+        if to_map:
+            mean, prob = self.encode_var(mean, return_p=True)
+            if return_p:
+                return mean, logvar, prob
+
+        return mean, logvar
+
+    def srec_loss(self, pos_ip, neg_ip):
+        r, _ = self.forward(pos_ip, to_map=False)  # mu not mapped
+        pos, _ = self.forward(pos_ip, to_map=True)  # mu
+        pos_scores = (pos * r).sum(-1)
+        pos_scores = pos_scores / torch.norm(r, 2, -1)
+        pos_scores = pos_scores / torch.norm(pos, 2, -1)
+
+        neg, _ = self.forward(neg_ip, to_map=True)
+        neg_scores = (neg * r).sum(-1)
+        neg_scores = neg_scores / torch.norm(r, 2, -1)
+        neg_scores = neg_scores / torch.norm(neg, 2, -1)
+
+        raw_loss = torch.clamp(1 - pos_scores + neg_scores, min=0.).mean(0)  # equation 7
+        srec_loss = raw_loss.mean()
+        return srec_loss
 
 class LSTMDecoder(nn.Module):
     def __init__(self, ni, nh, nz, dropout_in, dropout_out, vocab,

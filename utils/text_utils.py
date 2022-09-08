@@ -21,13 +21,14 @@ def get_preprocessor(dataset_name):
         raise NotImplementedError
 
 class Preprocessor:
-    def __init__(self, data_dir, enc_tokenizer, dec_tokenizer, overwrite_cache=False, subset=False, subset_count=10000):
+    def __init__(self, data_dir, enc_tokenizer, dec_tokenizer, sbert_model, overwrite_cache=False, subset=False, subset_count=10000):
         self.data_dir = data_dir
         self.enc_tokenizer = enc_tokenizer
         self.dec_tokenizer = dec_tokenizer
         self.overwrite_cache = overwrite_cache
         self.subset = subset
         self.subset_count = subset_count
+        self.sbert_model = sbert_model
     
     def load_features(self):
         raise NotImplementedError("Implement in child class!")
@@ -68,13 +69,14 @@ class GYAFCPreprocessor(Preprocessor):
 
                 enc_encodings = self.enc_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
                 dec_encodings = self.dec_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
+                enc_sbert_embeddings = torch.tensor(self.sbert_model.encode(dataset_sents))
                 dataset_task_labels = torch.tensor(dataset_task_labels)
                 # ensures correct reconstruction loss for GPT with padding
                 # read more here: https://github.com/huggingface/transformers/issues/2630
                 # CEL's ignore index is default -100
                 dataset_rec_labels = torch.where(dec_encodings["attention_mask"] == 1, dec_encodings["input_ids"], -100)
 
-                cached = (enc_encodings, dec_encodings, dataset_task_labels, dataset_rec_labels, dataset_sents)
+                cached = (enc_encodings, dec_encodings, dataset_task_labels, dataset_rec_labels, dataset_sents, enc_sbert_embeddings)
                 torch.save(cached, cache_fn)
                 output.append(cached)
 

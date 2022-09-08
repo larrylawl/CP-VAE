@@ -14,7 +14,7 @@ CONFIG = {}
 CONFIG["gyafc"] = {
     "ref0": "gyafc_all_model_prediction_ref0.csv",
     "ref1": "gyafc_all_model_prediction_ref1.csv",
-    "bsz": 8,
+    "bsz": 16,
     "label": True,
     "params": {
         "log_interval": 2000,
@@ -23,10 +23,10 @@ CONFIG["gyafc"] = {
         "dec_lr": 5e-5,
         "warm_up": 10,
         "kl_start": 0,
-        "beta1": 0,  # use annealing kl weight
-        "beta2": 0,  # use annealing kl weight
-        "srec_weight": 2, # original: 1
-        "reg_weight": 0.01, # original: 1
+        "beta1": 0,  # 0 to use annealing kl weight
+        "beta2": 0,  # 0 to use annealing kl weight
+        "srec_weight": 5, # original: 1
+        "reg_weight": 0.05, # original: 1
         "ic_weight": 0.0,
         "aggressive": False,
         "vae_params": {
@@ -37,7 +37,7 @@ CONFIG["gyafc"] = {
             "dec_name": "gpt2",
             "top_k": 5,
             "top_p": 0,
-            "temp": 1.0, # higher: more random
+            "temp": 1.0, # higher => more random
             "max_len": 30,
         },
     }

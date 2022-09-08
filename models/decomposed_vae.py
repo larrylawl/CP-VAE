@@ -83,23 +83,27 @@ class DecomposedVAE:
             enc_am = batch["enc_attention_mask"].to(self.device)
             dec_ids = batch["dec_input_ids"].to(self.device)
             rec_labels = batch["rec_labels"].to(self.device)
+            sent_embs = batch["sent_embs"].to(self.device)
 
             batch_neg = next(train_dl_neg)
-            neg_enc_ids = batch_neg["enc_input_ids"].to(self.device)
-            neg_enc_am = batch_neg["enc_attention_mask"].to(self.device)
+            neg_sent_embs = batch_neg["sent_embs"].to(self.device)
 
-            srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+            srec_loss = self.vae.enc_sem.srec_loss(sent_embs, neg_sent_embs)
             srec_loss = srec_loss * self.srec_weight
             reg_loss = self.vae.enc_sem.orthogonal_regularizer()
             reg_loss = reg_loss * self.reg_weight
 
-            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
+            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels, sent_embs)
             kl1_loss = kl1_loss * beta1
             kl2_loss = kl2_loss * beta2
             vae_loss = rec_loss + kl1_loss + kl2_loss
             vae_loss = vae_loss.mean()
 
-            loss = vae_loss + srec_loss + reg_loss
+            # print(f"vae_loss: {vae_loss}")
+            # print(f"srec_loss: {srec_loss}")
+            # print(f"reg_loss: {reg_loss}")
+            loss = reg_loss
+            # loss = vae_loss + srec_loss + reg_loss
             self.enc_optimizer.zero_grad()
             self.dec_optimizer.zero_grad()
             loss.backward()
@@ -163,17 +167,17 @@ class DecomposedVAE:
                 enc_am = batch["enc_attention_mask"].to(self.device)
                 dec_ids = batch["dec_input_ids"].to(self.device)
                 rec_labels = batch["rec_labels"].to(self.device)
+                sent_embs = batch["sent_embs"].to(self.device)
 
                 batch_neg = next(dl_neg)
-                neg_enc_ids = batch_neg["enc_input_ids"].to(self.device)
-                neg_enc_am = batch_neg["enc_attention_mask"].to(self.device)
+                neg_sent_embs = batch_neg["sent_embs"].to(self.device)
 
-                srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+                srec_loss = self.vae.enc_sem.srec_loss(sent_embs, neg_sent_embs)
                 srec_loss = srec_loss * self.srec_weight
                 reg_loss = self.vae.enc_sem.orthogonal_regularizer()
                 reg_loss = reg_loss * self.reg_weight
 
-                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels)
+                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels, sent_embs)
                 kl1_loss = kl1_loss * beta1
                 kl2_loss = kl2_loss * beta2
                 vae_loss = rec_loss + kl1_loss + kl2_loss

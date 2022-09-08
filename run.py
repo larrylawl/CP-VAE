@@ -15,16 +15,19 @@ import torch
 import time
 import config
 from models.decomposed_vae import DecomposedVAE
+from sentence_transformers import SentenceTransformer
 import numpy as np
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 def main(args):
+    print("WARNING: currently only uses reg loss")
     start_time = time.time()
     conf = config.CONFIG[args.data_name]
     data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
     enc_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["enc_name"])
     dec_tokenizer = AutoTokenizer.from_pretrained(conf["params"]["vae_params"]["dec_name"])
+    sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
     # padding for gpt2: # https://huggingface.co/patrickvonplaten/bert2gpt2-cnn_dailymail-fp16#training-script
     dec_tokenizer.pad_token = dec_tokenizer.unk_token  
     preprocessor_kwargs = {
@@ -33,6 +36,7 @@ def main(args):
         "dec_tokenizer": dec_tokenizer,
         "overwrite_cache": args.overwrite_cache,
         "subset": args.subset,
+        "sbert_model": sbert_model,
     }
     preprocessor = get_preprocessor(args.data_name)(**preprocessor_kwargs)
     features = preprocessor.load_features()
@@ -82,6 +86,7 @@ def main(args):
     params = conf["params"]
     # params["vae_params"]["vocab"] = vocab
     params["vae_params"]["device"] = device
+    params["vae_params"]["ni"] = train_ds.sent_embs[0].size(0)
     # params["vae_params"]["text_only"] = args.text_only
     # params["vae_params"]["mlp_ni"] = train_feat.shape[1]
     kwargs = dict(kwargs, **params)
