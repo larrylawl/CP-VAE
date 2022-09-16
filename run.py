@@ -21,7 +21,6 @@ from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
 
 def main(args):
-    print("WARNING: currently only uses reg loss")
     start_time = time.time()
     conf = config.CONFIG[args.data_name]
     data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
@@ -82,6 +81,7 @@ def main(args):
         "logging": logging,
         "text_only": args.text_only,
         "writer": writer,
+        "debug": args.debug
     }
     params = conf["params"]
     # params["vae_params"]["vocab"] = vocab
@@ -89,6 +89,8 @@ def main(args):
     params["vae_params"]["ni"] = train_ds.sent_embs[0].size(0)
     # params["vae_params"]["text_only"] = args.text_only
     # params["vae_params"]["mlp_ni"] = train_feat.shape[1]
+    if args.debug:
+        params["num_epochs"] = 1
     kwargs = dict(kwargs, **params)
 
     model = DecomposedVAE(**kwargs)

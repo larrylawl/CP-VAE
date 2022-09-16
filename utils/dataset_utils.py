@@ -1,4 +1,5 @@
 import torch
+import random
 from torch.utils.data import Dataset, Subset
 
 def get_dataset(dataset_name):
@@ -18,8 +19,9 @@ class GYAFCDataset(Dataset):
         self.sents = sents
         self.labels_type = self.get_labels_type()
         self.sent_embs = sent_embs
+        self.label_to_idxs = self.get_label_to_idxs()
 
-    def __getitem__(self, idx):
+    def _get_item_helper(self, idx):
         item = {}
         for key, val in self.enc_encs.items():
             item[f"enc_{key}"] = val[idx]
@@ -29,19 +31,20 @@ class GYAFCDataset(Dataset):
 
         item['labels'] = self.labels[idx]
         item["rec_labels"] = self.rec_labels[idx]
-        item["sent_embs"] = self.sent_embs[idx]
-        
-        # item = {
-        #     "labels": self.labels[idx]
-        # }
 
-        # # looping through all sentences
-        # for i in range(len(self.encodings)):
-        #     enc = self.encodings[i]
-        #     for k, v in enc.items(): # encodings from tokenizer: input_ids, atten_mask, etc
-        #         item[f"{k}_sent_{i}"] = v[idx]
-        # item['no_sentence'] = i + 1  # for meta CLS token
+        # sbert
+        item["sent_embs"] = self.sent_embs[idx]
+
         return item
+
+    def __getitem__(self, idx):
+        item = self._get_item_helper(idx)
+        label = self.labels[idx].item()
+        buddy_idx = random.choice(self.label_to_idxs[label])
+        buddy_item = self._get_item_helper(buddy_idx)
+        assert label == self.labels[buddy_idx]
+    
+        return item, buddy_item
     
     def __len__(self):
         return len(self.labels)
@@ -59,3 +62,18 @@ class GYAFCDataset(Dataset):
             if label == l:
                 idxs.append(i)
         return Subset(self, idxs)
+
+    def get_subset_specified_labels_idx(self, label):
+        assert label in self.labels_type
+        idxs = []
+        for i,l in enumerate(self.labels):
+            if label == l.item():
+                idxs.append(i)
+        return idxs
+
+    def get_label_to_idxs(self):
+        op = {}
+        for label in self.labels_type:
+            idxs = self.get_subset_specified_labels_idx(label)
+            op[label] = idxs
+        return op

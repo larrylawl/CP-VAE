@@ -87,6 +87,11 @@ class GaussianEncoderBase(nn.Module):
         eps = torch.zeros_like(std_expd).normal_()
         return mu_expd + torch.mul(eps, std_expd)
 
+    def my_encode(self, mu, logvar, nsamples=1):
+        z = self.parameterize(mu, logvar, nsamples)
+        KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
+        return z, KL
+
     def sample_from_inference(self, x, nsamples=1):
         mu, logvar = self.forward(x)
         batch_size, nz = mu.size()
@@ -210,17 +215,18 @@ class SemLSTMEncoder(GaussianEncoderBase):
         return self.encode_var(mean), logvar
 
 class SemMLPEncoder(GaussianEncoderBase):
-    def __init__(self, ni, nz, n_vars, model_init, device):
+    def __init__(self, ni, nz, n_vars, simplex_init, device):
         super(SemMLPEncoder, self).__init__()
         self.n_vars = n_vars
         self.device = device
 
         self.output = nn.Linear(ni, 2 * nz)
         self.var_embedding = nn.Parameter(torch.zeros((n_vars, nz)))
+        simplex_init(self.var_embedding)
 
         self.var_linear = nn.Linear(nz, n_vars)
 
-        self.reset_parameters(model_init)
+        # self.reset_parameters(model_init)
 
     def reset_parameters(self, model_init):
         for param in self.parameters():
@@ -234,7 +240,7 @@ class SemMLPEncoder(GaussianEncoderBase):
             return torch.matmul(prob, self.var_embedding), prob
         return torch.matmul(prob, self.var_embedding)
 
-    def orthogonal_regularizer(self, norm=100):
+    def orthogonal_regularizer(self, norm=1):
         # NOTE: Equation 6
         tmp = torch.mm(self.var_embedding, self.var_embedding.permute(1, 0))
         return torch.norm(tmp - norm * torch.diag(torch.ones(self.n_vars, device=self.device)), 2)
@@ -256,7 +262,7 @@ class SemMLPEncoder(GaussianEncoderBase):
 
         return mean, logvar
 
-    def srec_loss(self, pos_ip, neg_ip):
+    def srec_loss(self, pos_ip, neg_ip, neg_samples):
         r, _ = self.forward(pos_ip, to_map=False)  # mu not mapped
         pos, _ = self.forward(pos_ip, to_map=True)  # mu
         pos_scores = (pos * r).sum(-1)
@@ -264,13 +270,24 @@ class SemMLPEncoder(GaussianEncoderBase):
         pos_scores = pos_scores / torch.norm(pos, 2, -1)
 
         neg, _ = self.forward(neg_ip, to_map=True)
-        neg_scores = (neg * r).sum(-1)
+        neg_scores = (neg * r.repeat(neg_samples, 1)).sum(-1)
         neg_scores = neg_scores / torch.norm(r, 2, -1)
         neg_scores = neg_scores / torch.norm(neg, 2, -1)
+        neg_scores = neg_scores.view(neg_samples, -1)
+        pos_scores = pos_scores.unsqueeze(0).repeat(neg_samples, 1)
 
         raw_loss = torch.clamp(1 - pos_scores + neg_scores, min=0.).mean(0)  # equation 7
         srec_loss = raw_loss.mean()
         return srec_loss
+
+    def my_srec_loss(p, labels):
+        # for every label => find another one with same label => KL divergence
+        # find another with diff label => maximize KL
+
+        # same labels => minimise KL divergence
+        # same labels p => compare against random rearrangement => then kl divergence to encourage sim
+        # same and diff => encourage diff kl divergence
+        pass
 
 class LSTMDecoder(nn.Module):
     def __init__(self, ni, nh, nz, dropout_in, dropout_out, vocab,

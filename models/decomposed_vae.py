@@ -19,7 +19,7 @@ from copy import copy
 class DecomposedVAE:
     def __init__(self, train, valid, test, bsz, save_path, logging, writer, log_interval, num_epochs,
                  enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, srec_weight, reg_weight, ic_weight,
-                 aggressive, text_only, vae_params):
+                 aggressive, text_only, vae_params, debug):
         super(DecomposedVAE, self).__init__()
         self.bsz = bsz
         self.save_path = save_path
@@ -41,6 +41,7 @@ class DecomposedVAE:
         self.pre_mi = 0
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.debug = debug
 
         self.text_only = text_only
         self.train_dl = train
@@ -77,23 +78,29 @@ class DecomposedVAE:
         total_loss = 0
 
         train_dl_neg = iter(self.train_dl)
-        for batch in tqdm(self.train_dl):
+        for batch, buddy_batch in tqdm(self.train_dl):
             
             enc_ids = batch["enc_input_ids"].to(self.device)
             enc_am = batch["enc_attention_mask"].to(self.device)
             dec_ids = batch["dec_input_ids"].to(self.device)
             rec_labels = batch["rec_labels"].to(self.device)
-            sent_embs = batch["sent_embs"].to(self.device)
+            # sent_embs = batch["sent_embs"].to(self.device)
 
-            batch_neg = next(train_dl_neg)
-            neg_sent_embs = batch_neg["sent_embs"].to(self.device)
+            bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
+            bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
+            # bd_sent_embs = buddy_batch["sent_embs"].to(self.device)
 
-            srec_loss = self.vae.enc_sem.srec_loss(sent_embs, neg_sent_embs)
+            neg_batch, _ = next(train_dl_neg)
+            neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
+            neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
+
+            # neg_sent_embs = neg_batch["sent_embs"].to(self.device)
+            srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
             srec_loss = srec_loss * self.srec_weight
-            reg_loss = self.vae.enc_sem.orthogonal_regularizer()
+            reg_loss = self.vae.enc.orthogonal_regularizer()
             reg_loss = reg_loss * self.reg_weight
 
-            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels, sent_embs)
+            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
             kl1_loss = kl1_loss * beta1
             kl2_loss = kl2_loss * beta2
             vae_loss = rec_loss + kl1_loss + kl2_loss
@@ -102,8 +109,7 @@ class DecomposedVAE:
             # print(f"vae_loss: {vae_loss}")
             # print(f"srec_loss: {srec_loss}")
             # print(f"reg_loss: {reg_loss}")
-            loss = reg_loss
-            # loss = vae_loss + srec_loss + reg_loss
+            loss = vae_loss + srec_loss + reg_loss
             self.enc_optimizer.zero_grad()
             self.dec_optimizer.zero_grad()
             loss.backward()
@@ -118,6 +124,8 @@ class DecomposedVAE:
             total_reg_loss += reg_loss.item()
             total_srec_loss += srec_loss.item()
             total_loss += loss.item()
+            if self.debug:
+                break
             
         loss = total_loss / self.nbatch
         vae = total_vae_loss / self.nbatch
@@ -161,23 +169,29 @@ class DecomposedVAE:
 
             dl = self.val_dl if split == "Val" else self.test_dl
             dl_neg = iter(dl)
+            nbatch = len(dl)
             
-            for batch in tqdm(dl):
+            for batch, buddy_batch in tqdm(dl):
                 enc_ids = batch["enc_input_ids"].to(self.device)
                 enc_am = batch["enc_attention_mask"].to(self.device)
                 dec_ids = batch["dec_input_ids"].to(self.device)
                 rec_labels = batch["rec_labels"].to(self.device)
-                sent_embs = batch["sent_embs"].to(self.device)
+                # sent_embs = batch["sent_embs"].to(self.device)
 
-                batch_neg = next(dl_neg)
-                neg_sent_embs = batch_neg["sent_embs"].to(self.device)
+                bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
+                bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
 
-                srec_loss = self.vae.enc_sem.srec_loss(sent_embs, neg_sent_embs)
+                neg_batch, _ = next(dl_neg)
+                neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
+                neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
+
+                # srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+                srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
                 srec_loss = srec_loss * self.srec_weight
-                reg_loss = self.vae.enc_sem.orthogonal_regularizer()
+                reg_loss = self.vae.enc.orthogonal_regularizer()
                 reg_loss = reg_loss * self.reg_weight
 
-                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, dec_ids, rec_labels, sent_embs)
+                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
                 kl1_loss = kl1_loss * beta1
                 kl2_loss = kl2_loss * beta2
                 vae_loss = rec_loss + kl1_loss + kl2_loss
@@ -192,14 +206,16 @@ class DecomposedVAE:
                 total_reg_loss += reg_loss.item()
                 total_srec_loss += srec_loss.item()
                 total_loss += loss.item()
+                if self.debug:
+                    break
             
-        loss = total_loss / self.nbatch
-        vae = total_vae_loss / self.nbatch
-        rec = total_rec_loss / self.nbatch
-        kl1 = total_kl1_loss / self.nbatch
-        kl2 = total_kl2_loss / self.nbatch
-        srec = total_srec_loss / self.nbatch
-        reg = total_reg_loss / self.nbatch
+        loss = total_loss / nbatch
+        vae = total_vae_loss / nbatch
+        rec = total_rec_loss / nbatch
+        kl1 = total_kl1_loss / nbatch
+        kl2 = total_kl2_loss / nbatch
+        srec = total_srec_loss / nbatch
+        reg = total_reg_loss / nbatch
 
         loss_metrics = {
             "Overall loss": loss,
