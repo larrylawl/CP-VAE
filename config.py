@@ -25,6 +25,8 @@ CONFIG["gyafc"] = {
         "kl_start": 0,
         "beta1": 0,  # 0 to use annealing kl weight
         "beta2": 0,  # 0 to use annealing kl weight
+        "cycles": 4, # M in paper cyclical annealing schedule
+        "proportion": 0.5, # R in paper cyclical annealing schedule
         "srec_weight": 2.5, # original: 1
         "reg_weight": 10, # original: 1
         "ic_weight": 0.0,

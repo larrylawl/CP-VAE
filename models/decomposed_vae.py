@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 #
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,7 +19,7 @@ from copy import copy
 
 class DecomposedVAE:
     def __init__(self, train, valid, test, bsz, save_path, logging, writer, log_interval, num_epochs,
-                 enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, srec_weight, reg_weight, ic_weight,
+                 enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, cycles, proportion, srec_weight, reg_weight, ic_weight,
                  aggressive, text_only, vae_params, debug):
         super(DecomposedVAE, self).__init__()
         self.bsz = bsz
@@ -29,10 +30,12 @@ class DecomposedVAE:
         self.num_epochs = num_epochs
         self.enc_lr = enc_lr
         self.dec_lr = dec_lr
-        self.warm_up = warm_up
-        self.kl_weight = kl_start
-        self.beta1 = beta1
-        self.beta2 = beta2
+        # self.warm_up = warm_up
+        # self.kl_weight = kl_start
+        # self.beta1 = beta1
+        # self.beta2 = beta2
+        self.cycles = cycles
+        self.proportion = proportion
         self.srec_weight = srec_weight
         self.reg_weight = reg_weight
         self.ic_weight = ic_weight
@@ -59,15 +62,17 @@ class DecomposedVAE:
         # self.dec_optimizer = optim.SGD(self.vae.decoder.parameters(), lr=self.dec_lr)
 
         self.nbatch = len(self.train_dl)
-        self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
+        # self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
 
         assert not self.aggressive, "Not implemented yet."
+        assert self.num_epochs > self.cycles
 
     def train(self, epoch):
         self.vae.train()
-        self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
-        beta1 = self.beta1 if self.beta1 else self.kl_weight
-        beta2 = self.beta2 if self.beta2 else self.kl_weight
+        kl_weight = self.cyclic_annealing(epoch)
+        # self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
+        # beta1 = self.beta1 if self.beta1 else self.kl_weight
+        # beta2 = self.beta2 if self.beta2 else self.kl_weight
 
         total_rec_loss = 0
         total_kl1_loss = 0
@@ -103,9 +108,10 @@ class DecomposedVAE:
             reg_loss = reg_loss * self.reg_weight
 
             rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
-            kl1_loss = kl1_loss * beta1
-            kl2_loss = kl2_loss * beta2
+            kl1_loss = kl1_loss * kl_weight
+            kl2_loss = kl2_loss * kl_weight
             vae_loss = rec_loss + kl1_loss + kl2_loss
+            # vae_loss = rec_loss
             vae_loss = vae_loss.mean()
 
             # print(f"vae_loss: {vae_loss}")
@@ -156,9 +162,10 @@ class DecomposedVAE:
 
     def evaluate(self, split="Val", epoch=0):
         self.vae.eval()
+        kl_weight = self.cyclic_annealing(epoch)
 
-        beta1 = self.beta1 if self.beta1 else self.kl_weight
-        beta2 = self.beta2 if self.beta2 else self.kl_weight
+        # beta1 = self.beta1 if self.beta1 else self.kl_weight
+        # beta2 = self.beta2 if self.beta2 else self.kl_weight
 
         with torch.no_grad():
             total_rec_loss = 0
@@ -195,9 +202,10 @@ class DecomposedVAE:
                 reg_loss = reg_loss * self.reg_weight
 
                 rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
-                kl1_loss = kl1_loss * beta1
-                kl2_loss = kl2_loss * beta2
+                kl1_loss = kl1_loss * kl_weight
+                kl2_loss = kl2_loss * kl_weight
                 vae_loss = rec_loss + kl1_loss + kl2_loss
+                # vae_loss = rec_loss
                 vae_loss = vae_loss.mean()
 
                 loss = vae_loss + srec_loss + reg_loss
@@ -274,6 +282,19 @@ class DecomposedVAE:
                 break
 
         return best_loss
+
+    def cyclic_annealing(self, epoch):
+        # Equation 6 in paper: Cyclical Annealing Schedule
+        t = epoch
+        epochs_per_cycle = self.num_epochs / self.cycles
+        tau = ((t - 1) % math.ceil(epochs_per_cycle)) / (epochs_per_cycle)
+        if tau <= self.proportion:
+            return tau / self.proportion  # linear annealing
+        else:
+            return 1
+        
+            
+        
 
     def save(self, path):
         self.logging("saving to %s" % path)

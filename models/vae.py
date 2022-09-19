@@ -69,7 +69,8 @@ class DecomposedVAE(nn.Module):
         self.max_len = max_len
 
     def loss(self, enc_ids, enc_attn_mask, bd_enc_ids, bd_enc_attn_mask, dec_ids, rec_labels, nsamples=1):
-        z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)
+        # z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)
+        z1, KL1 = self.enc.encode_semantic(enc_ids, enc_attn_mask, nsamples=nsamples)
         z2, KL2 = self.enc.encode_syntax(enc_ids, enc_attn_mask, nsamples=nsamples)
         z = torch.cat([z1, z2], -1).squeeze()
         op = self.dec(input_ids=dec_ids, past=z, labels=rec_labels, label_ignore=-100)
