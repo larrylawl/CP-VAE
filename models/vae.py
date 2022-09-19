@@ -57,10 +57,10 @@ class DecomposedVAE(nn.Module):
         # simplex_init = nn.init.orthogonal_
         # self.enc_sem = SemMLPEncoder(ni=ni, nz=sem_nz, n_vars=n_vars, simplex_init=simplex_init, device=device)
         # self.enc_sem = BertForLatentConnector(sem_nz, device=device, name=enc_name, have_map=True, n_vars=n_vars, simplex_init=simplex_init)
-        self.dec_nz = syn_nz + sem_nz
+        self.dec_nz = sem_nz + syn_nz
         self.dec_config = GPT2Config.from_pretrained(dec_name)
         setattr(self.dec_config, "latent_size", self.dec_nz)
-        self.dec = GPT2ForLatentConnector.from_pretrained(dec_name, config=self.dec_config, latent_size=self.dec_nz, latent_as_gpt_emb=False)
+        self.dec = GPT2ForLatentConnector.from_pretrained(dec_name, config=self.dec_config, latent_size=self.dec_nz)
         self.device = device
         self.top_k = top_k
         self.top_p = top_p
@@ -69,10 +69,8 @@ class DecomposedVAE(nn.Module):
 
     def loss(self, enc_ids, enc_attn_mask, bd_enc_ids, bd_enc_attn_mask, dec_ids, rec_labels, nsamples=1):
         z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)
-        # z2, KL2 = self.enc.encode_syntax(enc_ids, enc_attn_mask, nsamples=nsamples)
-        z = z1
-        KL2 = torch.cuda.FloatTensor(1).fill_(0)
-        # z = torch.cat([z1, z2], -1).squeeze()
+        z2, KL2 = self.enc.encode_syntax(enc_ids, enc_attn_mask, nsamples=nsamples)
+        z = torch.cat([z1, z2], -1).squeeze()
         op = self.dec(input_ids=dec_ids, past=z, labels=rec_labels, label_ignore=-100)
         rec_loss = op[0]
         return rec_loss, KL1, KL2

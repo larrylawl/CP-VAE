@@ -30,9 +30,9 @@ CONFIG["gyafc"] = {
         "ic_weight": 0.0,
         "aggressive": False,
         "vae_params": {
-            "syn_nz": 40,
-            "sem_nz": 80,
-            "n_vars": 3,
+            "syn_nz": 16,
+            "sem_nz": 64,
+            "n_vars": 2,
             "enc_name": "distilbert-base-uncased",
             "dec_name": "gpt2",
             "top_k": 5,
