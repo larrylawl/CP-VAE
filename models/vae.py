@@ -10,7 +10,6 @@
 #################################################################################################
 
 
-from models.bert_enc import BertForLatentConnector
 import torch
 import torch.nn as nn
 
@@ -18,6 +17,8 @@ from .utils import uniform_initializer, value_initializer, gumbel_softmax
 from .base_network import LSTMEncoder, LSTMDecoder, SemMLPEncoder, SemLSTMEncoder
 from itertools import chain
 from .pytorch_transformers.modeling_gpt2 import GPT2ForLatentConnector, GPT2Config
+from models.bert_enc import BertForLatentConnector
+# from .pytorch_transformers.modeling_bert import BertForLatentConnector, BertConfig
 
 class VAE(nn.Module):
     def __init__(self, ni, nz, enc_nh, dec_nh, dec_dropout_in, dec_dropout_out, vocab, device):
@@ -51,7 +52,7 @@ class VAE(nn.Module):
 class DecomposedVAE(nn.Module):
     def __init__(self, enc_name, dec_name, syn_nz, sem_nz, n_vars, ni, device, top_k, top_p, temp, max_len):
         super(DecomposedVAE, self).__init__()
-        self.enc = BertForLatentConnector(syn_nz, sem_nz, device, name=enc_name, n_vars=n_vars)
+        self.enc = BertForLatentConnector(syn_nz=syn_nz, sem_nz=sem_nz, device=device, n_vars=n_vars, name=enc_name)
 
         # self.enc_syn = BertForLatentConnector(syn_nz, enc_name)
         # simplex_init = nn.init.orthogonal_

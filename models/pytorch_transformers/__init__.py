@@ -40,7 +40,7 @@ from .modeling_utils import (PreTrainedModel, prune_layer, Conv1D)
 from .modeling_auto import (AutoModel, AutoModelForSequenceClassification, AutoModelForQuestionAnswering,
                             AutoModelWithLMHead)
 
-from .modeling_bert import (BertPreTrainedModel, BertModel, BertForLatentConnector, BertForPreTraining,BertForSequenceClassificationLatentConnector,
+from .modeling_bert import (BertPreTrainedModel, BertModel, BertForLatentConnector, BertForLatentConnectorHelper, BertForPreTraining,BertForSequenceClassificationLatentConnector,
                             BertForMaskedLM, BertForNextSentencePrediction,
                             BertForSequenceClassification, BertForMultipleChoice,
                             BertForTokenClassification, BertForQuestionAnswering,

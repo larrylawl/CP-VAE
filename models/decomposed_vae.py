@@ -78,6 +78,7 @@ class DecomposedVAE:
         total_loss = 0
 
         train_dl_neg = iter(self.train_dl)
+
         for batch, buddy_batch in tqdm(self.train_dl):
             
             enc_ids = batch["enc_input_ids"].to(self.device)
@@ -90,13 +91,14 @@ class DecomposedVAE:
             bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
             # bd_sent_embs = buddy_batch["sent_embs"].to(self.device)
 
-            neg_batch, _ = next(train_dl_neg)
-            neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
-            neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
+            # neg_batch, _ = next(train_dl_neg)
+            # neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
+            # neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
 
             # neg_sent_embs = neg_batch["sent_embs"].to(self.device)
-            srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
-            srec_loss = srec_loss * self.srec_weight
+            # srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+            # srec_loss = srec_loss * self.srec_weight
+            srec_loss = torch.cuda.FloatTensor(1).fill_(0)
             reg_loss = self.vae.enc.orthogonal_regularizer()
             reg_loss = reg_loss * self.reg_weight
 
@@ -181,13 +183,14 @@ class DecomposedVAE:
                 bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
                 bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
 
-                neg_batch, _ = next(dl_neg)
-                neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
-                neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
+                # neg_batch, _ = next(dl_neg)
+                # neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
+                # neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
 
                 # srec_loss = self.vae.enc_sem.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
-                srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
-                srec_loss = srec_loss * self.srec_weight
+                # srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
+                # srec_loss = srec_loss * self.srec_weight
+                srec_loss = torch.cuda.FloatTensor(1).fill_(0)
                 reg_loss = self.vae.enc.orthogonal_regularizer()
                 reg_loss = reg_loss * self.reg_weight
 

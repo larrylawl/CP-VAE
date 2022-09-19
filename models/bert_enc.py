@@ -1,36 +1,44 @@
+from argparse import ArgumentError
+import math
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoConfig
 from .base_network import GaussianEncoderBase
+from .pytorch_transformers.modeling_bert import BertForLatentConnectorHelper, BertConfig
 
 class BertForLatentConnector(GaussianEncoderBase):
     def __init__(self, syn_nz, sem_nz, device, simplex_init=nn.init.orthogonal_, name="bert-base-uncased", n_vars=3):
         super(BertForLatentConnector, self).__init__()
-        self.config = AutoConfig.from_pretrained(name)
-        self.enc = AutoModel.from_pretrained(name)
+        self.enc_config = BertConfig.from_pretrained(name)
+        sub_num_hidden_layers = math.ceil(self.enc_config.num_hidden_layers / 4)
+        setattr(self.enc_config, "num_hidden_layers_z1",  sub_num_hidden_layers)
+        setattr(self.enc_config, "num_hidden_layers_z2",  sub_num_hidden_layers)
+        self.enc = BertForLatentConnectorHelper.from_pretrained(name, config=self.enc_config)
         self.n_vars = n_vars
         self.device = device
 
         # z1
-        self.linear = nn.Linear(self.config.hidden_size, 2 * sem_nz, bias=False)
+        self.linear_z1 = nn.Linear(self.enc_config.hidden_size, 2 * sem_nz, bias=False)
         self.var_embedding = nn.Parameter(torch.zeros((n_vars, sem_nz)))
         simplex_init(self.var_embedding)
         self.var_linear = nn.Linear(sem_nz, n_vars)   
 
         # z2 
-        self.linear_syn = nn.Linear(self.config.hidden_size, 2 * syn_nz, bias=False)    
+        self.linear_z2 = nn.Linear(self.enc_config.hidden_size, 2 * syn_nz, bias=False)    
 
-    def forward(self, inputs, attn_mask, return_p=False, to_map=True, type="sem"):
-        outputs = self.enc(inputs, attn_mask)
-        cls = outputs.last_hidden_state[:, 0, :]
-        if type == "syn":
-           mean, logvar = self.linear_syn(cls).chunk(2, -1)
-        else: # sem
-            mean, logvar = self.linear(cls).chunk(2, -1)
+    def forward(self, inputs, attn_mask, return_p=False, to_map=True, type="semantic"):
+        outputs = self.enc(inputs, attn_mask, type=type)
+        pooled_output = outputs[1]
+        if type == "semantic":
+            mean, logvar = self.linear_z1(pooled_output).chunk(2, -1)
             if to_map:
                 mean, prob = self.encode_var(mean)
                 if return_p: 
                     return mean, logvar, prob
+        elif type == "synthetic":
+           mean, logvar = self.linear_z2(pooled_output).chunk(2, -1)
+        else:
+            raise ArgumentError
+            
         return mean, logvar
 
     def encode_var(self, inputs):
@@ -70,14 +78,14 @@ class BertForLatentConnector(GaussianEncoderBase):
         return srec_loss
 
     def encode_syntax(self, inputs, attn_mask, nsamples=1):
-        mu, logvar = self.forward(inputs, attn_mask, type="syn")
+        mu, logvar = self.forward(inputs, attn_mask, type="synthetic")
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
         return z, KL
 
     def encode_semantic(self, inputs, attn_mask, nsamples=1):
-        mu, logvar = self.forward(inputs, attn_mask, type="sem")
+        mu, logvar = self.forward(inputs, attn_mask, type="semantic")
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)

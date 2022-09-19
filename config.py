@@ -32,8 +32,8 @@ CONFIG["gyafc"] = {
         "vae_params": {
             "syn_nz": 16,
             "sem_nz": 64,
-            "n_vars": 2,
-            "enc_name": "distilbert-base-uncased",
+            "n_vars": 3,
+            "enc_name": "bert-base-uncased",
             "dec_name": "gpt2",
             "top_k": 5,
             "top_p": 0,
