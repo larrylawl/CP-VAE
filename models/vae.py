@@ -50,7 +50,7 @@ class VAE(nn.Module):
         return self.encoder.calc_mi(x)
 
 class DecomposedVAE(nn.Module):
-    def __init__(self, enc_name, dec_name, syn_nz, sem_nz, n_vars, ni, device, top_k, top_p, temp, max_len):
+    def __init__(self, enc_name, dec_name, syn_nz, sem_nz, n_vars, device, top_k, top_p, temp, max_len):
         super(DecomposedVAE, self).__init__()
         self.enc = BertForLatentConnector(syn_nz=syn_nz, sem_nz=sem_nz, device=device, n_vars=n_vars, name=enc_name)
 
@@ -70,12 +70,12 @@ class DecomposedVAE(nn.Module):
 
     def loss(self, enc_ids, enc_attn_mask, bd_enc_ids, bd_enc_attn_mask, dec_ids, rec_labels, nsamples=1):
         # z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)
-        z1, KL1 = self.enc.encode_semantic(enc_ids, enc_attn_mask, nsamples=nsamples)
+        z1, KL1, p = self.enc.encode_semantic(enc_ids, enc_attn_mask, nsamples=nsamples)
         z2, KL2 = self.enc.encode_syntax(enc_ids, enc_attn_mask, nsamples=nsamples)
         z = torch.cat([z1, z2], -1).squeeze()
         op = self.dec(input_ids=dec_ids, past=z, labels=rec_labels, label_ignore=-100)
         rec_loss = op[0]
-        return rec_loss, KL1, KL2
+        return rec_loss, KL1, KL2, p
         
     # def encode_syntax(self, x, enc_attn_mask, nsamples=1):
     #     return self.enc_syn.encode(x, enc_attn_mask, nsamples)

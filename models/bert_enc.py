@@ -85,8 +85,8 @@ class BertForLatentConnector(GaussianEncoderBase):
         return z, KL
 
     def encode_semantic(self, inputs, attn_mask, nsamples=1):
-        mu, logvar = self.forward(inputs, attn_mask, type="semantic")
+        mu, logvar, p = self.forward(inputs, attn_mask, type="semantic", return_p=True)
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
-        return z, KL
+        return z, KL, p

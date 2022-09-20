@@ -55,3 +55,6 @@ def gumbel_softmax(logits, temperature):
     y_hard = y_hard.view(*shape)
     y_hard = (y_hard - y).detach() + y
     return y_hard
+
+def dropout_for_longtensor(tensor, keep_prob=0.8):
+    return torch.empty_like(tensor).bernoulli_(keep_prob) * tensor

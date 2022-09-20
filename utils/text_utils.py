@@ -15,68 +15,86 @@ from collections import defaultdict, OrderedDict
 ### Ours ###
 
 def get_preprocessor(dataset_name):
-    if "gyafc" == dataset_name:
+    if "gyafc" in dataset_name:
         return GYAFCPreprocessor
     else:
         raise NotImplementedError
 
 class Preprocessor:
-    def __init__(self, data_dir, enc_tokenizer, dec_tokenizer, sbert_model, overwrite_cache=False, subset=False, subset_count=10000):
+    def __init__(self, data_dir, subset=False, subset_count=10000):
         self.data_dir = data_dir
-        self.enc_tokenizer = enc_tokenizer
-        self.dec_tokenizer = dec_tokenizer
-        self.overwrite_cache = overwrite_cache
         self.subset = subset
         self.subset_count = subset_count
-        self.sbert_model = sbert_model
     
     def load_features(self):
         raise NotImplementedError("Implement in child class!")
 
 class GYAFCPreprocessor(Preprocessor):
-    def load_features(self):
+    def __init__(self, data_dir, subset=False, subset_count=10000):
+        super(GYAFCPreprocessor, self).__init__(data_dir, subset=subset, subset_count=subset_count)
+        self.train_fp = os.path.join(self.data_dir, "train_data.txt")
+        self.dev_fp = os.path.join(self.data_dir, "dev_data.txt")
+        self.test_fp = os.path.join(self.data_dir, "test_data.txt")
+
+    def load_datasets(self):
+        datasets = []
+
+        for fp in [self.train_fp, self.dev_fp, self.test_fp]:
+            dataset_sents = []
+            dataset_task_labels = []
+
+            with open(fp, "r", encoding="utf-8") as inf:
+                for line in tqdm(inf):
+                    label, sent = line.split("\t", 1)
+                    label = int(label)
+                    dataset_sents.append(sent)
+                    dataset_task_labels.append(label)
+            
+            if self.subset and self.subset_count < len(dataset_task_labels):
+                idxs = set(sample(range(0, len(dataset_task_labels)), self.subset_count))
+                dataset_task_labels = [x for i, x in enumerate(dataset_task_labels) if i in idxs]
+                dataset_sents = [x for i, x in enumerate(dataset_sents) if i in idxs] 
+            
+            datasets.append((dataset_sents, dataset_task_labels))
+        return datasets
+
+    def write_datasets(self, datasets, append_name="new"):
+        assert len(datasets) == 3
+        for fp, dataset in zip([self.train_fp, self.dev_fp, self.test_fp], datasets):
+            root, ext = os.path.splitext(fp)
+            op_fp = f"{root}_{append_name}{ext}" 
+            with open(op_fp, 'w') as f:
+                sents, labels = dataset
+                for sent, label in zip(sents, labels):
+                    f.write(f"{label}\t{sent}\n")
+
+    def load_features(self, enc_tokenizer, dec_tokenizer, overwrite_cache):
         output = []
 
-        train_fp = os.path.join(self.data_dir, "train_data.txt")
-        dev_fp = os.path.join(self.data_dir, "dev_data.txt")
-        test_fp = os.path.join(self.data_dir, "test_data.txt")
-
-        for fp in [train_fp, dev_fp, test_fp]:
+        for i, fp in enumerate([self.train_fp, self.dev_fp, self.test_fp]):
             if not fp: 
                 output.append(([], []))
                 continue
             root = os.path.splitext(fp)[0]
             cache_fn = f"{root}.pkl" if not self.subset else f"{root}_subset.pkl"
-            if os.path.isfile(cache_fn) and not self.overwrite_cache:
+            if os.path.isfile(cache_fn) and not overwrite_cache:
                 print(f"Loading cached encodings and labels: {fp}")
                 output.append(torch.load(cache_fn))
             else: # create from scratch
                 print(f"Creating encodings and labels: {fp}")
-                dataset_sents = []
-                dataset_task_labels = []
+                if not hasattr(self, "datasets"):
+                    self.datasets = self.load_datasets()
 
-                with open(fp, "r", encoding="utf-8") as inf:
-                    for line in tqdm(inf):
-                        label, sent = line.split("\t", 1)
-                        label = int(label)
-                        dataset_sents.append(sent)
-                        dataset_task_labels.append(label)
-                
-                if self.subset and self.subset_count < len(dataset_task_labels):
-                    idxs = set(sample(range(0, len(dataset_task_labels)), self.subset_count))
-                    dataset_task_labels = [x for i, x in enumerate(dataset_task_labels) if i in idxs]
-                    dataset_sents = [x for i, x in enumerate(dataset_sents) if i in idxs]
-
-                enc_encodings = self.enc_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
-                dec_encodings = self.dec_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
-                enc_sbert_embeddings = torch.tensor(self.sbert_model.encode(dataset_sents))
+                dataset_sents, dataset_task_labels = self.datasets[i]
+                enc_encodings = enc_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
+                dec_encodings = dec_tokenizer(dataset_sents, truncation=True, padding=True, return_tensors="pt")
                 dataset_task_labels = torch.tensor(dataset_task_labels)
                 # ensures correct reconstruction loss for GPT with padding
                 # read more here: https://github.com/huggingface/transformers/issues/2630
                 # CEL's ignore index is default -100
                 dataset_rec_labels = torch.where(dec_encodings["attention_mask"] == 1, dec_encodings["input_ids"], -100)
 
-                cached = (enc_encodings, dec_encodings, dataset_task_labels, dataset_rec_labels, dataset_sents, enc_sbert_embeddings)
+                cached = (enc_encodings, dec_encodings, dataset_task_labels, dataset_rec_labels, dataset_sents)
                 torch.save(cached, cache_fn)
                 output.append(cached)
 

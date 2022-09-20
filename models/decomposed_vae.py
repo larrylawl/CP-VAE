@@ -16,9 +16,11 @@ import time
 import os
 from tqdm import tqdm
 from copy import copy
+from .utils import dropout_for_longtensor
+import matplotlib.pyplot as plt
 
 class DecomposedVAE:
-    def __init__(self, train, valid, test, bsz, save_path, logging, writer, log_interval, num_epochs,
+    def __init__(self, train, valid, test, bsz, save_path, logging, to_plot, writer, log_interval, num_epochs,
                  enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, cycles, proportion, srec_weight, reg_weight, ic_weight,
                  aggressive, text_only, vae_params, debug):
         super(DecomposedVAE, self).__init__()
@@ -26,12 +28,13 @@ class DecomposedVAE:
         self.save_path = save_path
         self.logging = logging
         self.writer = writer
+        self.to_plot = to_plot
         self.log_interval = log_interval
         self.num_epochs = num_epochs
         self.enc_lr = enc_lr
         self.dec_lr = dec_lr
-        # self.warm_up = warm_up
-        # self.kl_weight = kl_start
+        self.warm_up = warm_up
+        self.kl_weight = kl_start
         # self.beta1 = beta1
         # self.beta2 = beta2
         self.cycles = cycles
@@ -62,15 +65,16 @@ class DecomposedVAE:
         # self.dec_optimizer = optim.SGD(self.vae.decoder.parameters(), lr=self.dec_lr)
 
         self.nbatch = len(self.train_dl)
-        # self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
+        self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
 
         assert not self.aggressive, "Not implemented yet."
-        assert self.num_epochs > self.cycles
+        # assert self.num_epochs > self.cycles
 
     def train(self, epoch):
         self.vae.train()
-        kl_weight = self.cyclic_annealing(epoch)
-        # self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
+        # kl_weight = self.cyclic_annealing(epoch)
+        # keep_prob = 1 - (kl_weight / 2)
+        self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
         # beta1 = self.beta1 if self.beta1 else self.kl_weight
         # beta2 = self.beta2 if self.beta2 else self.kl_weight
 
@@ -82,36 +86,40 @@ class DecomposedVAE:
         total_vae_loss = 0
         total_loss = 0
 
+        if self.to_plot:
+            p_accum = []  # for visualisation over epoch
+            labels_accum = []
+            if not os.path.exists(os.path.join(self.save_path, "simplex")):
+                os.makedirs(os.path.join(self.save_path, "simplex"))
+
         train_dl_neg = iter(self.train_dl)
 
         for batch, buddy_batch in tqdm(self.train_dl):
             
             enc_ids = batch["enc_input_ids"].to(self.device)
             enc_am = batch["enc_attention_mask"].to(self.device)
+            # enc_am = dropout_for_longtensor(enc_am, keep_prob=keep_prob)  # dropout as noise
             dec_ids = batch["dec_input_ids"].to(self.device)
             rec_labels = batch["rec_labels"].to(self.device)
-            # sent_embs = batch["sent_embs"].to(self.device)
 
-            bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
-            bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
-            # bd_sent_embs = buddy_batch["sent_embs"].to(self.device)
+            # bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
+            # bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
 
             # neg_batch, _ = next(train_dl_neg)
             # neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
             # neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
 
-            # neg_sent_embs = neg_batch["sent_embs"].to(self.device)
             # srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
             # srec_loss = srec_loss * self.srec_weight
             srec_loss = torch.cuda.FloatTensor(1).fill_(0)
             reg_loss = self.vae.enc.orthogonal_regularizer()
             reg_loss = reg_loss * self.reg_weight
 
-            rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
-            kl1_loss = kl1_loss * kl_weight
-            kl2_loss = kl2_loss * kl_weight
+            rec_loss, kl1_loss, kl2_loss, p = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels)
+            kl1_loss = kl1_loss * self.kl_weight
+            kl2_loss = kl2_loss * self.kl_weight
             vae_loss = rec_loss + kl1_loss + kl2_loss
-            # vae_loss = rec_loss
+            # vae_loss = rec_loss + kl2_loss
             vae_loss = vae_loss.mean()
 
             # print(f"vae_loss: {vae_loss}")
@@ -132,6 +140,11 @@ class DecomposedVAE:
             total_reg_loss += reg_loss.item()
             total_srec_loss += srec_loss.item()
             total_loss += loss.item()
+            
+            if self.to_plot:
+                p_accum.append(p.cpu().detach().numpy())
+                labels_accum.extend(batch["labels"].tolist())
+            
             if self.debug:
                 break
             
@@ -160,9 +173,20 @@ class DecomposedVAE:
         for k, v in loss_metrics.items():
             self.writer.add_scalar(f"Train/{k}", v, epoch)
 
+        if self.to_plot:
+            fp = os.path.join(self.save_path, "simplex", f"{epoch}.jpg")
+            print(f"saving plot to {fp}")
+            p = np.concatenate(p_accum)
+            labels = labels_accum
+            fig = plt.figure(figsize = (10, 7))
+            ax = plt.axes(projection ="3d")
+            ax.scatter(p[:,0], p[:,1], p[:,2], c=labels)
+            plt.title(f"3D scatter plot of simplex for epoch {epoch}")
+            plt.savefig(fp)
+
     def evaluate(self, split="Val", epoch=0):
         self.vae.eval()
-        kl_weight = self.cyclic_annealing(epoch)
+        # kl_weight = self.cyclic_annealing(epoch)
 
         # beta1 = self.beta1 if self.beta1 else self.kl_weight
         # beta2 = self.beta2 if self.beta2 else self.kl_weight
@@ -185,10 +209,9 @@ class DecomposedVAE:
                 enc_am = batch["enc_attention_mask"].to(self.device)
                 dec_ids = batch["dec_input_ids"].to(self.device)
                 rec_labels = batch["rec_labels"].to(self.device)
-                # sent_embs = batch["sent_embs"].to(self.device)
 
-                bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
-                bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
+                # bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
+                # bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
 
                 # neg_batch, _ = next(dl_neg)
                 # neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
@@ -201,11 +224,11 @@ class DecomposedVAE:
                 reg_loss = self.vae.enc.orthogonal_regularizer()
                 reg_loss = reg_loss * self.reg_weight
 
-                rec_loss, kl1_loss, kl2_loss = self.vae.loss(enc_ids, enc_am, bd_enc_ids, bd_enc_am, dec_ids, rec_labels)
-                kl1_loss = kl1_loss * kl_weight
-                kl2_loss = kl2_loss * kl_weight
+                rec_loss, kl1_loss, kl2_loss, _ = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels)
+                kl1_loss = kl1_loss * self.kl_weight
+                kl2_loss = kl2_loss * self.kl_weight
                 vae_loss = rec_loss + kl1_loss + kl2_loss
-                # vae_loss = rec_loss
+                # vae_loss = rec_loss + kl2_loss
                 vae_loss = vae_loss.mean()
 
                 loss = vae_loss + srec_loss + reg_loss
@@ -244,7 +267,7 @@ class DecomposedVAE:
                         rec, kl1, kl2, srec, reg)) 
         for k, v in loss_metrics.items():
             self.writer.add_scalar(f"{split}/{k}", v, epoch)
-        return loss
+        return rec  # return rec loss as kl losses linearly increases with epochs
 
     def fit(self):
         best_loss = 1e4
@@ -291,10 +314,7 @@ class DecomposedVAE:
         if tau <= self.proportion:
             return tau / self.proportion  # linear annealing
         else:
-            return 1
-        
-            
-        
+            return 1       
 
     def save(self, path):
         self.logging("saving to %s" % path)
