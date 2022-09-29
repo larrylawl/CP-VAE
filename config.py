@@ -14,7 +14,7 @@ CONFIG = {}
 CONFIG["gyafc"] = {
     "ref0": "gyafc_all_model_prediction_ref0.csv",
     "ref1": "gyafc_all_model_prediction_ref1.csv",
-    "bsz": 32,
+    "bsz": 16,
     "label": True,
     "params": {
         "log_interval": 2000,
@@ -27,20 +27,20 @@ CONFIG["gyafc"] = {
         "beta2": 0,  # 0 to use annealing kl weight
         "cycles": 1, # M in paper cyclical annealing schedule
         "proportion": 1, # R in paper cyclical annealing schedule
-        # "accum_iter": 4,  # gradient accumulation
+        "accum_iter": 2,  # gradient accumulation
         "srec_weight": 2.5, # original: 1
         "reg_weight": 10, # original: 1
         "ic_weight": 0.0,
         "aggressive": False,
         "vae_params": {
-            "syn_nz": 16,
-            "sem_nz": 64,
+            "syn_nz": 64,
+            "sem_nz": 16,
             "n_vars": 3,
             "enc_name": "bert-base-uncased",
             "dec_name": "gpt2",
             "top_k": 5,
             "top_p": 0,
-            "temp": 1.0, # higher => more random
+            "temp": 1, # higher => more random
             "max_len": 30,
         },
     }

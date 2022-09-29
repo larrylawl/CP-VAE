@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 #
 
-import random
 from utils.dataset_utils import get_dataset
 from utils.exp_utils import create_exp_dir, set_seed
 from utils.text_utils import get_preprocessor
@@ -44,7 +43,7 @@ def main(args):
     writer = SummaryWriter(save_path)
     scripts_to_save = [
         'run.py', 'models/decomposed_vae.py', 'models/vae.py',
-        'models/base_network.py', 'config.py']
+        'models/base_network.py', 'models/bert_enc.py', 'config.py']
     logging = create_exp_dir(save_path, scripts_to_save=scripts_to_save,
                              debug=args.debug)
 
@@ -80,7 +79,7 @@ def main(args):
         "logging": logging,
         "text_only": args.text_only,
         "writer": writer,
-        "debug": args.debug
+        "debug": args.debug,
     }
     params = conf["params"]
     # params["vae_params"]["vocab"] = vocab

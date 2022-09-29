@@ -43,13 +43,10 @@ def main(args):
     dec_tokenizer.pad_token = dec_tokenizer.unk_token  
     preprocessor_kwargs = {
         "data_dir": data_pth,
-        "enc_tokenizer": enc_tokenizer,
-        "dec_tokenizer": dec_tokenizer,
-        "overwrite_cache": args.overwrite_cache,
         "subset": args.subset,
     }
     preprocessor = get_preprocessor(args.data_name)(**preprocessor_kwargs)
-    features = preprocessor.load_features()
+    features = preprocessor.load_features(enc_tokenizer, dec_tokenizer, args.overwrite_cache)
     ds = get_dataset(args.data_name)
     train_ds = ds(*features[0])
     dev_ds = ds(*features[1])
@@ -84,9 +81,11 @@ def main(args):
         "test": test_dl,
         "bsz": conf["bsz"],
         "save_path": args.load_path,
+        "to_plot": None,
         "logging": None,
         "text_only": args.text_only,
         "writer": None,
+        "debug": None,
     }
 
     params = conf["params"]
@@ -129,17 +128,17 @@ def main(args):
                     "shuffle": False,
                     "drop_last": False} 
         dl = DataLoader(ds, **dl_params)
-        batch = next(iter(dl))
+        batch, _ = next(iter(dl))
         enc_ids = batch["enc_input_ids"].to(device)
         enc_am = batch["enc_attention_mask"].to(device)
-        _, _, p = model.vae.enc_sem(enc_ids, enc_am, return_p=True)
+        _, _, p = model.vae.enc.encode_semantic(enc_ids, enc_am)
         p = p.mean(0)
         topk = p.topk(params["vae_params"]["n_vars"], dim=0)
         for idx in topk[1]:
             idx = idx.item()
             if idx not in chosen_p_idx:
                 chosen_p_idx.add(idx)
-                label_to_simplex_mapping[label] = idx
+                label_to_simplex_mapping[label] = (idx, p)
                 break
             print("Collision!!! Using next most positive.")
         
@@ -176,36 +175,35 @@ def main(args):
     dl_params = {"batch_size": conf["bsz"],
                     "shuffle": False,
                     "drop_last": False} 
-    with open(os.path.join(args.load_path, 'generated_results_2.txt'), "w") as f:
+    with open(os.path.join(args.load_path, 'generated_results.txt'), "w") as f:
         with torch.no_grad():
             # repeat for all label
             for label_type in test_ds.labels_type:
                 ds = test_ds.get_subset_specified_labels(label_type, len(test_ds))
                 dl = DataLoader(ds, **dl_params)
-                for batch in tqdm(dl):
+                for batch, _ in tqdm(dl):
                     enc_ids = batch["enc_input_ids"].to(device)
                     enc_am = batch["enc_attention_mask"].to(device)
                     dec_ids = batch["dec_input_ids"].to(device)
-                    z1, _ = model.vae.encode_semantic(enc_ids, enc_am)
-                    z2, _ = model.vae.encode_syntax(enc_ids, enc_am)
+                    # z1, _, _ = model.vae.enc.encode_semantic(enc_ids, enc_am)
+                    z2, _ = model.vae.enc.encode_syntax(enc_ids, enc_am)
 
 
                     shuffled_labels = random.sample(list(test_ds.labels_type), len(test_ds.labels_type))
                     for tra_label in shuffled_labels:
                         if tra_label != label_type:
-                            idx = label_to_simplex_mapping[tra_label]
+                            idx, p = label_to_simplex_mapping[tra_label]
                             break
-                    tra_z1 = model.vae.enc_sem.var_embedding[idx, :].expand(z2.size(1), -1)
+                    tra_z1 = model.vae.enc.var_embedding[idx, :].expand(z2.size(1), -1)
                     z = torch.cat([tra_z1, z2.squeeze()], -1)
-                    generated = model.vae.sample_sequence_conditional_batch(context=dec_ids[:, 0] ,past=z)
+                    context = dec_ids[:, 0].unsqueeze(-1)  # first word as context
+                    generated = model.vae.sample_sequence_conditional_batch(context=context ,past=z)
                     generated = dec_tokenizer.batch_decode(generated, skip_special_tokens=True)
                     # for debugging
-                    # pre_generated = enc_tokenizer.batch_decode(enc_ids, skip_special_tokens=True)
-                    # print(f"generated: {generated}")
-                    # print(f"pre_generated: {pre_generated}")
-                    exit(1)
+                    pre_generated = enc_tokenizer.batch_decode(enc_ids, skip_special_tokens=True)
                     for text in generated:
                         f.write("%d\t%s\n" % (tra_label, process_transferred(text)))
+                    break
 
     # sep_id = -1
     # for idx, x in enumerate(test_data.labels):

@@ -90,3 +90,7 @@ class BertForLatentConnector(GaussianEncoderBase):
         # D[Q(z|X) || P(z)]
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
         return z, KL, p
+    
+    def freeze_shared_encoder_params(self):
+        for param in self.enc.encoder.parameters():
+            param.requires_grad = False

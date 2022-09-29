@@ -67,6 +67,7 @@ class DecomposedVAE(nn.Module):
         self.top_p = top_p
         self.temp = temp
         self.max_len = max_len
+        self.enc.freeze_shared_encoder_params()
 
     def loss(self, enc_ids, enc_attn_mask, bd_enc_ids, bd_enc_attn_mask, dec_ids, rec_labels, nsamples=1):
         # z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)

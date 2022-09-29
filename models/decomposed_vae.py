@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 class DecomposedVAE:
     def __init__(self, train, valid, test, bsz, save_path, logging, to_plot, writer, log_interval, num_epochs,
                  enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, cycles, proportion, srec_weight, reg_weight, ic_weight,
-                 aggressive, text_only, vae_params, debug):
+                 aggressive, text_only, vae_params, debug, accum_iter):
         super(DecomposedVAE, self).__init__()
         self.bsz = bsz
         self.save_path = save_path
@@ -37,6 +37,7 @@ class DecomposedVAE:
         self.kl_weight = kl_start
         # self.beta1 = beta1
         # self.beta2 = beta2
+        self.accum_iter = accum_iter
         self.cycles = cycles
         self.proportion = proportion
         self.srec_weight = srec_weight
@@ -94,7 +95,7 @@ class DecomposedVAE:
 
         train_dl_neg = iter(self.train_dl)
 
-        for batch, buddy_batch in tqdm(self.train_dl):
+        for batch_idx, (batch, buddy_batch) in tqdm(enumerate(self.train_dl), total=len(self.train_dl)):
             
             enc_ids = batch["enc_input_ids"].to(self.device)
             enc_am = batch["enc_attention_mask"].to(self.device)
@@ -126,12 +127,15 @@ class DecomposedVAE:
             # print(f"srec_loss: {srec_loss}")
             # print(f"reg_loss: {reg_loss}")
             loss = vae_loss + srec_loss + reg_loss
-            self.enc_optimizer.zero_grad()
-            self.dec_optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(self.vae.parameters(), 5.0)
-            self.enc_optimizer.step()
-            self.dec_optimizer.step()
+            norm_loss = loss / self.accum_iter  # gradient accumulation
+            norm_loss.backward()
+
+            if ((batch_idx + 1) % self.accum_iter == 0) or (batch_idx + 1 == len(self.train_dl)):
+                nn.utils.clip_grad_norm_(self.vae.parameters(), 5.0)
+                self.enc_optimizer.step()
+                self.dec_optimizer.step()
+                self.enc_optimizer.zero_grad()
+                self.dec_optimizer.zero_grad()
 
             total_rec_loss += rec_loss.mean().item()
             total_kl1_loss += kl1_loss.mean().item()
@@ -204,7 +208,7 @@ class DecomposedVAE:
             dl_neg = iter(dl)
             nbatch = len(dl)
             
-            for batch, buddy_batch in tqdm(dl):
+            for batch_idx, (batch, buddy_batch) in tqdm(enumerate(dl), total=len(dl)):
                 enc_ids = batch["enc_input_ids"].to(self.device)
                 enc_am = batch["enc_attention_mask"].to(self.device)
                 dec_ids = batch["dec_input_ids"].to(self.device)
