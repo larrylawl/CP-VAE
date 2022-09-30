@@ -19,8 +19,8 @@ CONFIG["gyafc"] = {
     "params": {
         "log_interval": 2000,
         "num_epochs": 10,
-        "enc_lr": 5e-5,
-        "dec_lr": 5e-5,
+        "enc_lr": 5e-6,
+        "dec_lr": 5e-6,
         "warm_up": 10,
         "kl_start": 0,
         "beta1": 0,  # 0 to use annealing kl weight
@@ -30,12 +30,13 @@ CONFIG["gyafc"] = {
         "accum_iter": 2,  # gradient accumulation
         "srec_weight": 2.5, # original: 1
         "reg_weight": 10, # original: 1
+        "style_weight": 10,
         "ic_weight": 0.0,
         "aggressive": False,
         "vae_params": {
             "syn_nz": 64,
             "sem_nz": 16,
-            "n_vars": 3,
+            "n_vars": 2,
             "enc_name": "bert-base-uncased",
             "dec_name": "gpt2",
             "top_k": 5,

@@ -58,17 +58,6 @@ def main(args):
     dev_dl = DataLoader(dev_ds, **dl_params)
     test_dl = DataLoader(test_ds, **dl_params)
 
-    # if args.text_only:
-    #     train = train_data.create_data_batch(args.bsz, device)
-    #     dev = dev_data.create_data_batch(args.bsz, device)
-    #     test = test_data.create_data_batch(args.bsz, device)
-    #     feat = train
-    # else:
-    #     train = train_data.create_data_batch_feats(args.bsz, train_feat, device)
-    #     dev = dev_data.create_data_batch_feats(args.bsz, dev_feat, device)
-    #     test = test_data.create_data_batch_feats(args.bsz, test_feat, device)
-    #     feat = train_feat
-
     kwargs = {
         "train": train_dl,
         "valid": dev_dl,
@@ -82,10 +71,7 @@ def main(args):
         "debug": args.debug,
     }
     params = conf["params"]
-    # params["vae_params"]["vocab"] = vocab
     params["vae_params"]["device"] = device
-    # params["vae_params"]["text_only"] = args.text_only
-    # params["vae_params"]["mlp_ni"] = train_feat.shape[1]
     if args.debug:
         params["num_epochs"] = 1
     kwargs = dict(kwargs, **params)

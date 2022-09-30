@@ -639,7 +639,7 @@ class GPT2ForLatentConnector(GPT2PreTrainedModel):
         loss, logits = outputs[:2]
 
     """
-    def __init__(self, config, latent_size=32, latent_as_gpt_emb=True, latent_as_gpt_memory=True):
+    def __init__(self, config, latent_as_gpt_emb=True, latent_as_gpt_memory=True):
         
         super(GPT2ForLatentConnector, self).__init__(config)
 

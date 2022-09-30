@@ -32,8 +32,11 @@ class BertForLatentConnector(GaussianEncoderBase):
             mean, logvar = self.linear_z1(pooled_output).chunk(2, -1)
             if to_map:
                 mean, prob = self.encode_var(mean)
-                if return_p: 
-                    return mean, logvar, prob
+            else:
+                prob = self.var_linear(mean)
+
+            if return_p:
+                return mean, logvar, prob
         elif type == "synthetic":
            mean, logvar = self.linear_z2(pooled_output).chunk(2, -1)
         else:
@@ -47,7 +50,6 @@ class BertForLatentConnector(GaussianEncoderBase):
         prob = nn.Softmax(dim=-1)(logits)
         return torch.matmul(prob, self.var_embedding), prob
     
-    # TODO: not sure why original norm is 100. shouldn't it be 1
     def orthogonal_regularizer(self, norm=1):
         # NOTE: Equation 6 in CPVAE
         tmp = torch.mm(self.var_embedding, self.var_embedding.transpose(1, 0))
@@ -70,13 +72,6 @@ class BertForLatentConnector(GaussianEncoderBase):
         srec_loss = raw_loss.mean()
         return srec_loss
 
-    def srec_loss_mine(self, pos_ip, pos_attn_mask, neg_ip, neg_attn_mask):
-        assert self.have_map
-        _, _, pos_p = self.forward(pos_ip, pos_attn_mask, return_p=True)
-        _, _, neg_p = self.forward(neg_ip, neg_attn_mask, return_p=True)
-        srec_loss = torch.clamp(1 - pos_p - neg_p, min=0.).mean()
-        return srec_loss
-
     def encode_syntax(self, inputs, attn_mask, nsamples=1):
         mu, logvar = self.forward(inputs, attn_mask, type="synthetic")
         z = self.reparameterize(mu, logvar, nsamples)
@@ -84,10 +79,11 @@ class BertForLatentConnector(GaussianEncoderBase):
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
         return z, KL
 
-    def encode_semantic(self, inputs, attn_mask, nsamples=1):
-        mu, logvar, p = self.forward(inputs, attn_mask, type="semantic", return_p=True)
+    def encode_semantic(self, inputs, attn_mask, style_labels, nsamples=1):
+        mu, logvar, p = self.forward(inputs, attn_mask, type="semantic", return_p=True, to_map=False)
         z = self.reparameterize(mu, logvar, nsamples)
-        # D[Q(z|X) || P(z)]
+        # D[Q(z|X) || P(z)], where P(z) is the standard normal
+        # TODO: use p(z | y), where y are the style labels
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
         return z, KL, p
     

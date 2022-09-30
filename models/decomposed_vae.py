@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 #
-
+import umap
 import math
 import torch
 import torch.nn as nn
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 class DecomposedVAE:
     def __init__(self, train, valid, test, bsz, save_path, logging, to_plot, writer, log_interval, num_epochs,
-                 enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, cycles, proportion, srec_weight, reg_weight, ic_weight,
+                 enc_lr, dec_lr, warm_up, kl_start, beta1, beta2, cycles, proportion, srec_weight, reg_weight, style_weight, ic_weight,
                  aggressive, text_only, vae_params, debug, accum_iter):
         super(DecomposedVAE, self).__init__()
         self.bsz = bsz
@@ -42,6 +42,7 @@ class DecomposedVAE:
         self.proportion = proportion
         self.srec_weight = srec_weight
         self.reg_weight = reg_weight
+        self.style_weight = style_weight
         self.ic_weight = ic_weight
         self.aggressive = aggressive
         self.opt_dict = {"not_improved": 0, "lr": 1., "best_loss": 1e4}
@@ -49,6 +50,8 @@ class DecomposedVAE:
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.debug = debug
+        self.save_simplex_path = os.path.join(self.save_path, "simplex")
+        self.save_umap_path = os.path.join(self.save_path, "umap")
 
         self.text_only = text_only
         self.train_dl = train
@@ -85,13 +88,8 @@ class DecomposedVAE:
         total_srec_loss = 0
         total_reg_loss = 0
         total_vae_loss = 0
+        total_style_loss = 0
         total_loss = 0
-
-        if self.to_plot:
-            p_accum = []  # for visualisation over epoch
-            labels_accum = []
-            if not os.path.exists(os.path.join(self.save_path, "simplex")):
-                os.makedirs(os.path.join(self.save_path, "simplex"))
 
         train_dl_neg = iter(self.train_dl)
 
@@ -102,6 +100,7 @@ class DecomposedVAE:
             # enc_am = dropout_for_longtensor(enc_am, keep_prob=keep_prob)  # dropout as noise
             dec_ids = batch["dec_input_ids"].to(self.device)
             rec_labels = batch["rec_labels"].to(self.device)
+            style_labels = batch["labels"].to(self.device)
 
             # bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
             # bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
@@ -116,7 +115,8 @@ class DecomposedVAE:
             reg_loss = self.vae.enc.orthogonal_regularizer()
             reg_loss = reg_loss * self.reg_weight
 
-            rec_loss, kl1_loss, kl2_loss, p = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels)
+            rec_loss, kl1_loss, kl2_loss, _, style_loss, _ = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels, style_labels)
+            style_loss = style_loss * self.style_weight
             kl1_loss = kl1_loss * self.kl_weight
             kl2_loss = kl2_loss * self.kl_weight
             vae_loss = rec_loss + kl1_loss + kl2_loss
@@ -126,7 +126,8 @@ class DecomposedVAE:
             # print(f"vae_loss: {vae_loss}")
             # print(f"srec_loss: {srec_loss}")
             # print(f"reg_loss: {reg_loss}")
-            loss = vae_loss + srec_loss + reg_loss
+            # print(f"style_loss: {style_loss}")
+            loss = vae_loss + srec_loss + reg_loss + style_loss
             norm_loss = loss / self.accum_iter  # gradient accumulation
             norm_loss.backward()
 
@@ -143,11 +144,8 @@ class DecomposedVAE:
             total_vae_loss += vae_loss.item()
             total_reg_loss += reg_loss.item()
             total_srec_loss += srec_loss.item()
+            total_style_loss += style_loss.item()
             total_loss += loss.item()
-            
-            if self.to_plot:
-                p_accum.append(p.cpu().detach().numpy())
-                labels_accum.extend(batch["labels"].tolist())
             
             if self.debug:
                 break
@@ -159,6 +157,7 @@ class DecomposedVAE:
         kl2 = total_kl2_loss / self.nbatch
         srec = total_srec_loss / self.nbatch
         reg = total_reg_loss / self.nbatch
+        style = total_style_loss / self.nbatch
 
         loss_metrics = {
             "Overall loss": loss,
@@ -168,25 +167,16 @@ class DecomposedVAE:
             "kl2": kl2,
             "srec": srec,
             "reg": reg,
+            "style": style,
         }
         self.logging(
                     '| train metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
-                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
+                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f} | style {:3.2f}'.format(
                         epoch, loss, vae, 
-                        rec, kl1, kl2, srec, reg)) 
+                        rec, kl1, kl2, srec, reg, style)) 
         for k, v in loss_metrics.items():
             self.writer.add_scalar(f"Train/{k}", v, epoch)
 
-        if self.to_plot:
-            fp = os.path.join(self.save_path, "simplex", f"{epoch}.jpg")
-            print(f"saving plot to {fp}")
-            p = np.concatenate(p_accum)
-            labels = labels_accum
-            fig = plt.figure(figsize = (10, 7))
-            ax = plt.axes(projection ="3d")
-            ax.scatter(p[:,0], p[:,1], p[:,2], c=labels)
-            plt.title(f"3D scatter plot of simplex for epoch {epoch}")
-            plt.savefig(fp)
 
     def evaluate(self, split="Val", epoch=0):
         self.vae.eval()
@@ -202,7 +192,18 @@ class DecomposedVAE:
             total_srec_loss = 0
             total_reg_loss = 0
             total_vae_loss = 0
+            total_style_loss = 0
             total_loss = 0
+
+            z1_accum = []  # for umap
+            to_plot_in_this_epoch = self.to_plot % 3 == 1  # plot every 3 epochs
+
+            if to_plot_in_this_epoch:
+                p_accum = []  # for visualisation over epoch
+                labels_accum = []
+                if not os.path.exists(os.path.join(self.save_simplex_path)):
+                    os.makedirs(self.save_simplex_path)
+                    os.makedirs(self.save_umap_path)
 
             dl = self.val_dl if split == "Val" else self.test_dl
             dl_neg = iter(dl)
@@ -213,6 +214,7 @@ class DecomposedVAE:
                 enc_am = batch["enc_attention_mask"].to(self.device)
                 dec_ids = batch["dec_input_ids"].to(self.device)
                 rec_labels = batch["rec_labels"].to(self.device)
+                style_labels = batch["labels"].to(self.device)
 
                 # bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
                 # bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
@@ -228,14 +230,15 @@ class DecomposedVAE:
                 reg_loss = self.vae.enc.orthogonal_regularizer()
                 reg_loss = reg_loss * self.reg_weight
 
-                rec_loss, kl1_loss, kl2_loss, _ = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels)
+                rec_loss, kl1_loss, kl2_loss, p, style_loss, z1 = self.vae.loss(enc_ids, enc_am, None, None, dec_ids, rec_labels, style_labels)
+                style_loss = style_loss * self.style_weight
                 kl1_loss = kl1_loss * self.kl_weight
                 kl2_loss = kl2_loss * self.kl_weight
                 vae_loss = rec_loss + kl1_loss + kl2_loss
                 # vae_loss = rec_loss + kl2_loss
                 vae_loss = vae_loss.mean()
 
-                loss = vae_loss + srec_loss + reg_loss
+                loss = vae_loss + srec_loss + reg_loss + style_loss
 
                 total_rec_loss += rec_loss.mean().item()
                 total_kl1_loss += kl1_loss.mean().item()
@@ -243,7 +246,14 @@ class DecomposedVAE:
                 total_vae_loss += vae_loss.item()
                 total_reg_loss += reg_loss.item()
                 total_srec_loss += srec_loss.item()
+                total_style_loss += style_loss.item()
                 total_loss += loss.item()
+
+                if to_plot_in_this_epoch:
+                    p_accum.append(p.cpu().detach().numpy())
+                    labels_accum.extend(batch["labels"].tolist())
+                    z1_accum.append(z1.cpu().detach().numpy())
+
                 if self.debug:
                     break
             
@@ -254,6 +264,7 @@ class DecomposedVAE:
         kl2 = total_kl2_loss / nbatch
         srec = total_srec_loss / nbatch
         reg = total_reg_loss / nbatch
+        style = total_style_loss / nbatch
 
         loss_metrics = {
             "Overall loss": loss,
@@ -263,15 +274,28 @@ class DecomposedVAE:
             "kl2": kl2,
             "srec": srec,
             "reg": reg,
+            "style": style,
         }
         self.logging(
                     '| {} metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
-                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
+                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f} | style {:3.2f}'.format(
                         split, epoch, loss, vae, 
-                        rec, kl1, kl2, srec, reg)) 
+                        rec, kl1, kl2, srec, reg, style)) 
         for k, v in loss_metrics.items():
             self.writer.add_scalar(f"{split}/{k}", v, epoch)
-        return rec  # return rec loss as kl losses linearly increases with epochs
+        
+        if to_plot_in_this_epoch:
+            # plotting simplex p
+            p = np.concatenate(p_accum)
+            labels = labels_accum
+            self.plot_simplex(p, labels, epoch)
+
+            # plotting umap of z1
+            z1 = np.concatenate(z1_accum)
+            self.plot_umap(z1, labels, epoch)
+
+        tracked_loss = rec + style
+        return tracked_loss  # return rec loss as kl losses linearly increases with epochs
 
     def fit(self):
         best_loss = 1e4
@@ -329,222 +353,25 @@ class DecomposedVAE:
         model_path = os.path.join(path, "model.pt")
         self.vae.load_state_dict(torch.load(model_path))
 
-
-    def oldtrain(self, epoch):
-        self.vae.train()
-
-        total_rec_loss = 0
-        total_kl1_loss = 0
-        total_kl2_loss = 0
-        total_srec_loss = 0
-        total_reg_loss = 0
-        total_vae_loss = 0
-        total_loss = 0
-        num_words = 0
-        num_sents = 0
-
-        for idx in np.random.permutation(range(self.nbatch)):
-            batch_data = self.train_data[idx]
-            batch_feat = self.train_feat[idx]
-            sent_len, batch_size = batch_data.size()
-
-            shift = np.random.randint(max(1, sent_len - 9))
-            batch_data = batch_data[shift:min(sent_len, shift + 10), :]
-            sent_len, batch_size = batch_data.size()
-
-            target = batch_data[1:]
-            num_words += (sent_len - 1) * batch_size
-            num_sents += batch_size
-            self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
-            beta1 = self.beta1 if self.beta1 else self.kl_weight
-            beta2 = self.beta2 if self.beta2 else self.kl_weight
-
-            loss = 0
-
-            sub_iter = 1
-            batch_data_enc = batch_data
-            batch_feat_enc = batch_feat
-            burn_num_words = 0
-            burn_pre_loss = 1e4
-            burn_cur_loss = 0
-            while self.aggressive and sub_iter < 100:
-                self.enc_optimizer.zero_grad()
-                self.dec_optimizer.zero_grad()
-
-                target_enc = batch_data_enc[1:]
-                burn_sent_len, burn_batch_size = batch_data_enc.size()
-                burn_num_words += (burn_sent_len - 1) * burn_batch_size
-
-                logits, kl1_loss, kl2_loss, reg_ic = self.vae.loss(batch_data_enc, batch_feat_enc)
-                logits = logits.view(-1, logits.size(2))
-                rec_loss = F.cross_entropy(logits, target_enc.view(-1), reduction="none")
-                rec_loss = rec_loss.view(-1, burn_batch_size).sum(0)
-                loss = rec_loss + beta1 * kl1_loss + beta2 * kl2_loss
-
-                burn_cur_loss = loss.sum().item()
-                loss = loss.mean(dim=-1)
-
-                loss.backward(retain_graph=True)
-                torch.nn.utils.clip_grad_norm_(self.enc_params, 0.1)
-                torch.nn.utils.clip_grad_norm_(self.vae.decoder.parameters(), 5.0)
-
-                self.enc_optimizer.step()
-
-                id_ = np.random.randint(self.nbatch)
-                batch_data_enc = self.train_data[id_]
-                batch_feat_enc = self.train_feat[id_]
-                burn_sent_len, burn_batch_size = batch_data_enc.size()
-                shift = np.random.randint(max(1, burn_sent_len - 9))
-                batch_data_enc = batch_data_enc[shift:min(burn_sent_len, shift + 10), :]
-
-                if sub_iter % 15 == 0:
-                    burn_cur_loss = burn_cur_loss / burn_num_words
-                    if burn_pre_loss - burn_cur_loss < 0:
-                        break
-                    burn_pre_loss = burn_cur_loss
-                    burn_cur_loss = burn_num_words = 0
-
-                sub_iter += 1
-
-            self.enc_optimizer.zero_grad()
-            self.dec_optimizer.zero_grad()
-
-            vae_logits, vae_kl1_loss, vae_kl2_loss, reg_ic = self.vae.loss(
-                batch_data, batch_feat, no_ic=self.ic_weight == 0)
-            vae_logits = vae_logits.view(-1, vae_logits.size(2))
-            vae_rec_loss = F.cross_entropy(vae_logits, target.view(-1), reduction="none")
-            vae_rec_loss = vae_rec_loss.view(-1, batch_size).sum(0)
-            vae_loss = vae_rec_loss + beta1 * vae_kl1_loss + beta2 * vae_kl2_loss
-            if self.ic_weight > 0:
-                vae_loss += self.ic_weight * reg_ic
-            vae_loss = vae_loss.mean()
-            loss = loss + vae_loss
-
-            total_rec_loss += vae_rec_loss.mean().item()
-            total_kl1_loss += vae_kl1_loss.mean().item()
-            total_kl2_loss += vae_kl2_loss.mean().item()
-            total_vae_loss += vae_loss.item()
-
-            if self.text_only:
-                while True:
-                    idx = np.random.choice(self.nbatch)
-                    neg_feat = self.feat[idx]
-                    if neg_feat.size(1) >= batch_size:
-                        break
-                idx = np.random.choice(batch_size, batch_size, replace=False)
-                neg_feat = neg_feat[:, idx]
-                var_loss, reg_loss, var_raw_loss = self.vae.var_loss(batch_feat, neg_feat, 1)
-            else:
-                idx = np.random.choice(self.feat.shape[1], batch_size * 10)
-                neg_feat = torch.tensor(self.feat[idx], dtype=torch.float,
-                                        requires_grad=False, device=self.device)
-                srec_loss, reg_loss, srec_raw_loss = self.vae.var_loss(batch_feat, neg_feat, 10)
-            total_srec_loss += srec_loss.item()
-            total_reg_loss += reg_loss.item()
-            
-            loss = loss + self.srec_weight * srec_loss + self.reg_weight * reg_loss  # equation 8
-            total_loss += loss.item()
-
-            loss.backward()
-
-            nn.utils.clip_grad_norm_(self.vae.parameters(), 5.0)
-            if not self.aggressive:
-                self.enc_optimizer.step()
-            self.dec_optimizer.step()
-        
-        loss = total_loss / self.nbatch
-        vae = total_vae_loss / self.nbatch
-        rec = total_rec_loss / self.nbatch
-        kl1 = total_kl1_loss / self.nbatch
-        kl2 = total_kl2_loss / self.nbatch
-        srec = total_srec_loss / self.nbatch
-        reg = total_reg_loss / self.nbatch
-
-        loss_metrics = {
-            "Overall loss": loss,
-            "vae": vae,
-            "rec": rec,
-            "kl1": kl1,
-            "kl2": kl2,
-            "srec": srec,
-            "reg": reg,
-        }
-        self.logging(
-                    '| train metrics of epoch {:2d} | Overall loss  {:3.2f} | vae  {:3.2f} | '
-                    'recon {:3.2f} | kl1 {:3.2f} | kl2 {:3.2f} | srec {:3.2f} | reg {:3.2f}'.format(
-                        epoch, loss, vae, 
-                        rec, kl1, kl2, srec, reg)) 
-        for k, v in loss_metrics.items():
-            self.writer.add_scalar(f"Train/{k}", v, epoch)
-
-
-    def oldevaluate(self, eval_data, eval_feat):
-        self.vae.eval()
-
-        beta1 = self.beta1 if self.beta1 else self.kl_weight
-        beta2 = self.beta2 if self.beta2 else self.kl_weight
-        total_rec_loss = 0
-        total_kl1_loss = 0
-        total_kl2_loss = 0
-        total_srec_loss = 0
-        total_reg_loss = 0
-        total_vae_loss = 0
-        total_loss = 0
-        total_mi1 = 0
-        total_mi2 = 0
-        num_sents = 0
-        num_words = 0
-        nbatch_eval = len(eval_data)
-
-        with torch.no_grad():
-            for batch_data, batch_feat in zip(eval_data, eval_feat):
-                sent_len, batch_size = batch_data.size()
-                shift = np.random.randint(max(1, sent_len - 9))
-                batch_data = batch_data[shift:min(sent_len, shift + 10), :]
-                sent_len, batch_size = batch_data.size()
-                target = batch_data[1:]
-
-                num_sents += batch_size
-                num_words += (sent_len - 1) * batch_size
-
-                vae_logits, vae_kl1_loss, vae_kl2_loss, _ = self.vae.loss(
-                    batch_data, batch_feat)
-                vae_logits = vae_logits.view(-1, vae_logits.size(2))
-                vae_rec_loss = F.cross_entropy(vae_logits, target.view(-1), reduction="none")
-                vae_rec_loss = vae_rec_loss.view(-1, batch_size).sum(0)
-                vae_loss = vae_rec_loss + beta1 * vae_kl1_loss + beta2 * vae_kl2_loss
-                vae_loss = vae_loss.mean()
-
-                total_rec_loss += vae_rec_loss.mean().item()
-                total_kl1_loss += vae_kl1_loss.mean().item()
-                total_kl2_loss += vae_kl2_loss.mean().item()
-                total_vae_loss += vae_loss.item()
-
-                mi1, mi2 = self.vae.calc_mi_q(batch_data, batch_feat)
-                total_mi1 += mi1 * batch_size
-                total_mi2 += mi2 * batch_size
-
-                if self.text_only:
-                    raise NotImplementedError
-                else:
-                    idx = np.random.choice(self.feat.shape[1], batch_size * 10)
-                    neg_feat = torch.tensor(self.feat[idx], dtype=torch.float,
-                                            requires_grad=False, device=self.device)
-                    srec_loss, reg_loss, srec_raw_loss = self.vae.var_loss(batch_feat, neg_feat, 10)
-                total_srec_loss += srec_loss.item()
-                total_reg_loss += reg_loss.item()
-
-                loss = vae_loss + self.srec_weight * srec_loss + self.reg_weight * reg_loss  # equation 8
-                total_loss += loss.item()
-
-        cur_rec_loss = total_rec_loss / nbatch_eval
-        cur_kl1_loss = total_kl1_loss / nbatch_eval
-        cur_kl2_loss = total_kl2_loss / nbatch_eval
-        cur_vae_loss = total_vae_loss / nbatch_eval
-        cur_mi1 = total_mi1 / num_sents  
-        cur_mi2 = total_mi2 / num_sents
-        cur_srec_loss = total_srec_loss / nbatch_eval
-        cur_reg_loss = total_reg_loss / nbatch_eval
-        cur_loss = total_loss / nbatch_eval
-        
-        return cur_loss, cur_vae_loss, cur_rec_loss, cur_kl1_loss, cur_kl2_loss, cur_mi1, cur_mi2, cur_srec_loss, cur_reg_loss
+    def plot_simplex(self, p, labels, epoch):
+        plt.clf()
+        fp = os.path.join(self.save_simplex_path, f"{epoch}.jpg")
+        fig = plt.figure(figsize = (10, 7))
+        ax = plt.axes(projection ="3d")
+        ax.scatter(p[:,0], p[:,1], c=labels)
+        plt.title(f"Scatter plot of simplex for epoch {epoch}")
+        plt.savefig(fp)
+        self.logging(f"saving simplex plot to {fp}")
+    
+    def plot_umap(self, z1, labels, epoch):
+        plt.clf()
+        fp = os.path.join(self.save_umap_path, f"{epoch}.jpg")
+        reducer = umap.UMAP()
+        z1 = reducer.fit_transform(z1)
+        plt.clf()
+        plt.scatter(z1[:, 0], z1[:, 1], c=labels, cmap='Spectral', s=5)
+        plt.gca().set_aspect('auto', 'datalim')
+        plt.colorbar(boundaries=np.arange(3)-0.5).set_ticks(np.arange(2))
+        plt.title(f'UMAP projection for epoch {epoch}', fontsize=24)
+        plt.savefig(fp)
+        self.logging(f"saving umap plot to {fp}")
