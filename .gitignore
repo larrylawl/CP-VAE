@@ -15,6 +15,6 @@
 **/*.png
 **/*.jsonl
 data/*
-scripts/
+scripts/*
 plot_gp/*
 .ipynb_checkpoints/*
