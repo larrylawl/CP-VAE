@@ -16,7 +16,7 @@ data_pth = os.path.join(args.hard_disk_dir, "data", args.data_name, "processed")
 where `args.hard_disk_dir` and `args.data_name` are specified in the script.
 
 ## Training
-Training with CP-VAE. Current model is CP-VAE with shared encoder and style loss.
+Training with CP-VAE. Current model is CP-VAE with shared BERT encoder, GPT2 decoder, and style loss.
 
 ```
 data_name=gyafc
