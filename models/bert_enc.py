@@ -25,18 +25,18 @@ class BertForLatentConnector(GaussianEncoderBase):
         # z2 
         self.linear_z2 = nn.Linear(self.enc_config.hidden_size, 2 * syn_nz, bias=False)    
 
-    def forward(self, inputs, attn_mask, return_p=False, to_map=True, type="semantic"):
+    def forward(self, inputs, attn_mask, return_logits=False, to_map=True, type="semantic"):
         outputs = self.enc(inputs, attn_mask, type=type)
         pooled_output = outputs[1]
         if type == "semantic":
             mean, logvar = self.linear_z1(pooled_output).chunk(2, -1)
             if to_map:
-                mean, prob = self.encode_var(mean)
+                mean, logits = self.encode_var(mean)
             else:
-                prob = self.var_linear(mean)
+                logits = self.var_linear(mean)
 
-            if return_p:
-                return mean, logvar, prob
+            if return_logits:
+                return mean, logvar, logits
         elif type == "synthetic":
            mean, logvar = self.linear_z2(pooled_output).chunk(2, -1)
         else:
@@ -48,7 +48,7 @@ class BertForLatentConnector(GaussianEncoderBase):
         # NOTE: Equation 3 in CPVAE
         logits = self.var_linear(inputs)
         prob = nn.Softmax(dim=-1)(logits)
-        return torch.matmul(prob, self.var_embedding), prob
+        return torch.matmul(prob, self.var_embedding), logits
     
     def orthogonal_regularizer(self, norm=1):
         # NOTE: Equation 6 in CPVAE
@@ -80,12 +80,12 @@ class BertForLatentConnector(GaussianEncoderBase):
         return z, KL
 
     def encode_semantic(self, inputs, attn_mask, style_labels, nsamples=1):
-        mu, logvar, p = self.forward(inputs, attn_mask, type="semantic", return_p=True, to_map=False)
+        mu, logvar, logits = self.forward(inputs, attn_mask, type="semantic", return_logits=True, to_map=True)
         z = self.reparameterize(mu, logvar, nsamples)
         # D[Q(z|X) || P(z)], where P(z) is the standard normal
-        # TODO: use p(z | y), where y are the style labels
+        # TODO: (Adam's idea) use p(z | y), where y are the style labels
         KL = 0.5 * (mu.pow(2) + logvar.exp() - logvar - 1).sum(1)
-        return z, KL, p
+        return z, KL, logits
     
     def freeze_shared_encoder_params(self):
         for param in self.enc.encoder.parameters():

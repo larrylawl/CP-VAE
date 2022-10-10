@@ -99,7 +99,9 @@ def main(args):
         label_to_z1_mapping[label] = z1
         label_to_p_mapping[label] = p
     print(f"Label label_to_p_mapping: {label_to_p_mapping}")
-    # ### choosing basis vector most representative of label  ###
+
+
+    # ### CP-VAE: choosing basis vector most representative of label  ###
     # label_to_simplex_mapping = {}
     # chosen_p_idx = set()
     # for label in train_ds.labels_type:
@@ -152,18 +154,16 @@ def main(args):
                     # tra_z1 = model.vae.enc.var_embedding[idx, :].expand(z2.size(1), -1)
                     z = torch.cat([tra_z1, z2.squeeze()], -1)
                     context = dec_ids[:, 0].unsqueeze(-1)  # first word as context-
-                    model.vae.dec.generate(context, max_length=50)
-                    exit(1)
+
                     generated = model.vae.sample_sequence_conditional_batch(context=context ,past=z)
                     generated = dec_tokenizer.batch_decode(generated, skip_special_tokens=True)
-                    # for debugging
-                    pre_generated = enc_tokenizer.batch_decode(enc_ids, skip_special_tokens=True)
-                    print(f"pregen: {pre_generated}")
-                    print(f"gen: {generated}")
-                    exit(1)
+                    # # for debugging
+                    # pre_generated = enc_tokenizer.batch_decode(enc_ids, skip_special_tokens=True)
+                    # print(f"pregen: {pre_generated}")
+                    # print(f"gen: {generated}")
+                    # exit(1)
                     for text in generated:
                         f.write("%d\t%s\n" % (tra_label, process_transferred(text)))
-                    break
 
 def add_args(parser):
     parser.add_argument('--data_name', type=str, default='yelp')

@@ -68,20 +68,22 @@ class DecomposedVAE(nn.Module):
         self.temp = temp
         self.max_len = max_len
         self.style_loss = nn.CrossEntropyLoss()
+        
+        ### Freezing shared encoder parameters ###
         # self.enc.freeze_shared_encoder_params()
         
 
     def loss(self, enc_ids, enc_attn_mask, bd_enc_ids, bd_enc_attn_mask, dec_ids, rec_labels, style_labels, nsamples=1):
         # z1, KL1 = self.enc.encode_semantic(bd_enc_ids, bd_enc_attn_mask, nsamples=nsamples)
-        z1, KL1, p = self.enc.encode_semantic(enc_ids, enc_attn_mask, style_labels, nsamples=nsamples)  # z1 size: (bsz, sem_nz)
+        z1, KL1, logits = self.enc.encode_semantic(enc_ids, enc_attn_mask, style_labels, nsamples=nsamples)  # z1 size: (bsz, sem_nz)
         z2, KL2 = self.enc.encode_syntax(enc_ids, enc_attn_mask, nsamples=nsamples)
         z1 = z1.squeeze()
         z2 = z2.squeeze()
         z = torch.cat([z1, z2], -1)
         op = self.dec(input_ids=dec_ids, past=z, labels=rec_labels, label_ignore=-100)
         rec_loss = op[0]
-        style_loss = self.style_loss(p, style_labels)
-        return rec_loss, KL1, KL2, p, style_loss, z1
+        style_loss = self.style_loss(logits, style_labels)
+        return rec_loss, KL1, KL2, logits, style_loss, z1
         
     # def encode_syntax(self, x, enc_attn_mask, nsamples=1):
     #     return self.enc_syn.encode(x, enc_attn_mask, nsamples)

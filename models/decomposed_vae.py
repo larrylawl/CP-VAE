@@ -35,8 +35,6 @@ class DecomposedVAE:
         self.dec_lr = dec_lr
         self.warm_up = warm_up
         self.kl_weight = kl_start
-        # self.beta1 = beta1
-        # self.beta2 = beta2
         self.accum_iter = accum_iter
         self.cycles = cycles
         self.proportion = proportion
@@ -64,23 +62,17 @@ class DecomposedVAE:
 
         self.enc_optimizer = optim.Adam(self.vae.get_enc_params(), lr=self.enc_lr)
         self.dec_optimizer = optim.Adam(self.vae.get_dec_params(), lr=self.dec_lr)
-        # self.enc_params = list(self.vae.lstm_encoder.parameters()) + \
-        #     list(self.vae.mlp_encoder.parameters())
-        # self.dec_optimizer = optim.SGD(self.vae.decoder.parameters(), lr=self.dec_lr)
 
         self.nbatch = len(self.train_dl)
         self.anneal_rate = (1.0 - kl_start) / (warm_up * self.nbatch)
 
         assert not self.aggressive, "Not implemented yet."
-        # assert self.num_epochs > self.cycles
 
     def train(self, epoch):
         self.vae.train()
         # kl_weight = self.cyclic_annealing(epoch)
         # keep_prob = 1 - (kl_weight / 2)
         self.kl_weight = min(1.0, self.kl_weight + self.anneal_rate)
-        # beta1 = self.beta1 if self.beta1 else self.kl_weight
-        # beta2 = self.beta2 if self.beta2 else self.kl_weight
 
         total_rec_loss = 0
         total_kl1_loss = 0
@@ -102,6 +94,7 @@ class DecomposedVAE:
             rec_labels = batch["rec_labels"].to(self.device)
             style_labels = batch["labels"].to(self.device)
 
+            ### TextSettr idea ###
             # bd_enc_ids = buddy_batch["enc_input_ids"].to(self.device)
             # bd_enc_am = buddy_batch["enc_attention_mask"].to(self.device)
 
@@ -109,6 +102,7 @@ class DecomposedVAE:
             # neg_enc_ids = neg_batch["enc_input_ids"].to(self.device)
             # neg_enc_am = neg_batch["enc_attention_mask"].to(self.device)
 
+            ### srec loss ###
             # srec_loss = self.vae.enc.srec_loss(enc_ids, enc_am, neg_enc_ids, neg_enc_am)
             # srec_loss = srec_loss * self.srec_weight
             srec_loss = torch.cuda.FloatTensor(1).fill_(0)
@@ -120,7 +114,6 @@ class DecomposedVAE:
             kl1_loss = kl1_loss * self.kl_weight
             kl2_loss = kl2_loss * self.kl_weight
             vae_loss = rec_loss + kl1_loss + kl2_loss
-            # vae_loss = rec_loss + kl2_loss
             vae_loss = vae_loss.mean()
 
             # print(f"vae_loss: {vae_loss}")
@@ -180,10 +173,6 @@ class DecomposedVAE:
 
     def evaluate(self, split="Val", epoch=0):
         self.vae.eval()
-        # kl_weight = self.cyclic_annealing(epoch)
-
-        # beta1 = self.beta1 if self.beta1 else self.kl_weight
-        # beta2 = self.beta2 if self.beta2 else self.kl_weight
 
         with torch.no_grad():
             total_rec_loss = 0
@@ -235,7 +224,6 @@ class DecomposedVAE:
                 kl1_loss = kl1_loss * self.kl_weight
                 kl2_loss = kl2_loss * self.kl_weight
                 vae_loss = rec_loss + kl1_loss + kl2_loss
-                # vae_loss = rec_loss + kl2_loss
                 vae_loss = vae_loss.mean()
 
                 loss = vae_loss + srec_loss + reg_loss + style_loss

@@ -98,14 +98,14 @@ def add_args(parser):
     parser.add_argument('--bsz', type=int, default=32,
                         help='batch size for training')
     parser.add_argument('--text_only', default=False, action='store_true',
-                        help='use text only without feats')
+                        help='use text only without feats. does not matter for our current iteration of cpvae')
     parser.add_argument('--debug', default=False, action='store_true',
-                        help='enable debug mode')
-    parser.add_argument('--subset', default=False, action='store_true')
+                        help='enable debug mode.')
+    parser.add_argument('--subset', default=False, action='store_true', help="Use subset of training data for fast experimentation")
     parser.add_argument('--feat', type=str, default='fm',
-                        help='feat repr')
+                        help="feat repr. fm stands for foundation model."),
     parser.add_argument('--overwrite_cache', default=False, action="store_true")
-    parser.add_argument('--to_plot', default=False, action="store_true")
+    parser.add_argument('--to_plot', default=False, action="store_true", help="Plots simplex p and umap of z1.")
     parser.add_argument("--seed", type=int, default=888)
 
 if __name__ == "__main__":
